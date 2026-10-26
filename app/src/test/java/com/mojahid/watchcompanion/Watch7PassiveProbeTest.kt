@@ -51,4 +51,26 @@ class Watch7PassiveProbeTest {
             "NOTIFY", "6e40000d-b5a3-f393-e0a9-e50e24dcca9e", byteArrayOf(0x01, 0x02))
         assertEquals("NOTIFY 6e40000d (2 B): 01 02", line)
     }
+    @Test fun optionalIdProbeOnlyOnTwoNonOtaWriteWithResponseCharacteristics() {
+        for (name in listOf("b", "c")) {
+            assertTrue(Watch7PassiveProbe.canProbe(
+                Watch7PassiveProbe.VENDOR_SERVICE, "6e40000$name$suffix", 0x1c))
+        }
+        assertFalse(Watch7PassiveProbe.canProbe(
+            Watch7PassiveProbe.VENDOR_SERVICE, "6e40000d$suffix", 0x10))
+        assertFalse(Watch7PassiveProbe.canProbe(
+            Watch7PassiveProbe.VENDOR_SERVICE, "6e40000b$suffix", 0x04))
+        assertFalse(Watch7PassiveProbe.canProbe(
+            "a6ed0401-d344-460a-8075-b9e8ec90d71b",
+            "a6ed0403-d344-460a-8075-b9e8ec90d71b", 0x08))
+    }
+
+    @Test fun speculativeIdentityRequestIsFixedNonFirmwareQuery() {
+        assertArrayEquals(
+            byteArrayOf(0xBC.toByte(), 0x3C, 0x01, 0x01, 0x00, 0x00),
+            Watch7PassiveProbe.speculativeProductIdQuery
+        )
+        assertEquals(6, Watch7PassiveProbe.speculativeProductIdQuery.size)
+    }
+
 }
