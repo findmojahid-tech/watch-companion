@@ -75,3 +75,25 @@ trace from the same device/firmware, with service/characteristic mapping,
 encoding, acknowledgment behavior, display dimensions, rollback instructions,
 and proof that the transfer does not enter Goodix DFU. Until then, PNG export
 is an asset only, not a watch-screen feature.
+
+## W17 Pro model-specific recovery evidence (2026-10-27)
+
+A repair article specifically names a **Smochm W17 Pro** and reports Goodix
+GRToolbox/DFU recovery following a failed MActivePro firmware update:
+https://www.shiningintl.com/supports/technical-support/smart-watch/how-to-fix-the-smochm-w17pro-smartwatch-blocked-after-updaing-firmware/
+
+This is **stronger model-family evidence** for the observed Goodix-style OTA
+service than unrelated watch protocol repositories, but does **not** establish
+that the owner's Microwear W17 Pro firmware 4.21 has identical board/firmware
+or the ability to write an ordinary photo dial through OTA. The article
+illustrates that an incorrect update can leave the watch with a black screen.
+Do not execute its bootloader/DFU commands, install its utility, or flash its
+firmware on the owner's watch.
+
+Historical MActivePro release notes explicitly mention a W17 adaptation fix
+and dial push fixes (different dates/versions), making **vendor dial-transfer
+implementation or authorized trace** the highest-value next evidence:
+https://apptopia.com/ios/app/1587451906/about
+
+**Result:** Watch-face upload remains blocked; no user-visible test APK,
+BLE writes, or firmware changes are justified by these findings.
