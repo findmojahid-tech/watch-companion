@@ -211,7 +211,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                             "Speech input was not captured on Watch call.").apply()
                         scheduleListening(1300)
                     } else {
-                        val candidate = result.hypotheses.firstOrNull().orEmpty()
+                        val candidate = WakePhrase.selectHypothesis(result.hypotheses)
                         handlePhrase(candidate)
                     }
                 },
@@ -270,8 +270,9 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                 handled = true
                 releaseRecognizer()
                 errorsInRow = 0
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()?.trim().orEmpty()
+                val text = WakePhrase.selectHypothesis(
+                    results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                ).trim()
                 handlePhrase(text)
             }
         })
