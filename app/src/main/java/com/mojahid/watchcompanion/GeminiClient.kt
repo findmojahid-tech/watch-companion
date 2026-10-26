@@ -12,7 +12,7 @@ import java.net.URL
  * User supplies their own API key locally in the app. No server / hard-coded keys.
  */
 object GeminiClient {
-    private const val MODEL = "gemini-2.5-flash-lite"
+    private const val MODEL = "gemini-3.5-flash-lite"
     private const val ENDPOINT =
         "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent"
 
