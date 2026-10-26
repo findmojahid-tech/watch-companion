@@ -14,8 +14,8 @@ android {
         applicationId = "com.mojahid.watchcompanion"
         minSdk = 31
         targetSdk = 35
-        versionCode = 8
-        versionName = "8.0"
+        versionCode = 9
+        versionName = "9.0"
     }
 
     compileOptions {
@@ -26,7 +26,7 @@ android {
     buildTypes {
         getByName("debug") {
             // Diagnostic APK installs beside V3 instead of replacing its tasks/key.
-            applicationIdSuffix = ".momo8"
+            applicationIdSuffix = ".momo9"
         }
     }
 
