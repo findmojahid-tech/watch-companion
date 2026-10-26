@@ -37,6 +37,9 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Validate task behavior and persistence
+        run: gradle --no-daemon :app:testDebugUnitTest
+
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
