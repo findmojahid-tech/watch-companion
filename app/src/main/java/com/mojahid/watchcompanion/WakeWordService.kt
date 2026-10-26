@@ -56,6 +56,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     private var busy = false
     private var awaitingCommandUntil = 0L
     private var errorsInRow = 0
+    private var conversation = emptyList<ChatTurn>()
 
     override fun onCreate() {
         super.onCreate()
@@ -254,10 +255,13 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                     "I didn't understand that. Enable free Gemini AI in the app's AI Setup tab."
                 } else {
                     runCatching {
-                        val intent = GeminiClient.interpret(text, engine.tasks(), key)
-                        engine.applyAi(intent).message
-                    }.getOrElse {
-                        "I couldn't reach Gemini right now. Try a simple task command."
+                        val answer = GeminiClient.chat(text, conversation, key)
+                        conversation = (conversation + ChatTurn("user", text) +
+                            ChatTurn("model", answer)).takeLast(8)
+                        answer
+                    }.getOrElse { error ->
+                        "Gemini error: " +
+                            (error.message ?: "Check the saved API key or internet connection.").take(170)
                     }
                 }
             }
