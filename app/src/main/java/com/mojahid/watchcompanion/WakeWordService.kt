@@ -124,8 +124,8 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         )
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Momo: English wake listening (beta)")
-            .setContentText("Say Hey Momo. Tap Stop to disable. May use battery.")
+            .setContentTitle("Momo is listening")
+            .setContentText("Say Momo or Hey Momo. Stop from here anytime.")
             .setOngoing(true)
             .addAction(0, "Stop", pending)
             .build()
@@ -140,13 +140,15 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                      it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
                      it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER)
             }
-            if (device != null && audio.setCommunicationDevice(device)) {
+            if (device != null) {
                 audio.mode = AudioManager.MODE_IN_COMMUNICATION
+                audio.setCommunicationDevice(device)
             }
         }
     }
 
     private fun say(text: String) {
+        prefs.edit().putString("wake_last_answer", text.take(800)).apply()
         if (!speechReady) {
             scheduleListening(1100)
             return
@@ -173,21 +175,45 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         val sr = SpeechRecognizer.createSpeechRecognizer(this)
         recognizer = sr
         sr.setRecognitionListener(object : RecognitionListener {
+            private var partialHits = 0
+            private var handled = false
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onPartialResults(partialResults: Bundle?) {
+                if (handled) return
+                val suggestions = partialResults?.getStringArrayList(
+                    SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                val exactWake = suggestions.firstOrNull {
+                    val phrase = it.trim().lowercase(Locale.ROOT)
+                    phrase == "momo" || phrase == "hey momo" ||
+                        phrase == "hello momo" || phrase == "hi momo"
+                }
+                if (exactWake != null) partialHits++ else partialHits = 0
+                if (partialHits >= 2 && exactWake != null) {
+                    handled = true
+                    releaseRecognizer()
+                    handlePhrase(exactWake)
+                }
+            }
             override fun onEvent(eventType: Int, params: Bundle?) {}
 
             override fun onError(error: Int) {
+                if (handled) return
                 releaseRecognizer()
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    stopSelf()
+                    return
+                }
                 errorsInRow = (errorsInRow + 1).coerceAtMost(8)
-                scheduleListening((950L + errorsInRow * 650L).coerceAtMost(7000L))
+                scheduleListening((650L + errorsInRow * 450L).coerceAtMost(5500L))
             }
 
             override fun onResults(results: Bundle?) {
+                if (handled) return
+                handled = true
                 releaseRecognizer()
                 errorsInRow = 0
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -201,7 +227,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         }
         runCatching { sr.startListening(intent) }.onFailure {
             releaseRecognizer()
@@ -224,6 +250,9 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun handlePhrase(text: String) {
+        if (text.isNotBlank()) {
+            prefs.edit().putString("wake_last_heard", text).apply()
+        }
         if (text.isBlank()) {
             scheduleListening(800)
             return
@@ -232,7 +261,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             val command = stripWake(text)
             if (command.isBlank()) {
                 awaitingCommandUntil = SystemClock.elapsedRealtime() + 12000L
-                say("Yes! I'm here. What can I do for you?")
+                say("Yes?")
             } else {
                 awaitingCommandUntil = 0
                 answer(command)
@@ -248,25 +277,30 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     private fun answer(text: String) {
         busy = true
         worker.launch {
-            val local = engine.tryLocal(text)
-            val output = if (local != null) local.message else {
-                val key = keys.read()
-                if (key.isNullOrBlank()) {
-                    "I didn't understand that. Enable free Gemini AI in the app's AI Setup tab."
+            val output = try {
+                val local = engine.tryLocal(text)
+                if (local != null) {
+                    local.message
+                } else if (OfflineModelStore(this@WakeWordService).verified()) {
+                    OfflineMomo.answer(this@WakeWordService, text)
                 } else {
-                    runCatching {
-                        val answer = GeminiClient.chat(text, conversation, key)
+                    val key = keys.read()
+                    if (key.isNullOrBlank()) {
+                        "To answer any question without an API key, first download " +
+                            "the free offline Momo brain inside the app."
+                    } else {
+                        val response = GeminiClient.chat(text, conversation, key)
                         conversation = (conversation + ChatTurn("user", text) +
-                            ChatTurn("model", answer)).takeLast(8)
-                        answer
-                    }.getOrElse { error ->
-                        "Gemini error: " +
-                            (error.message ?: "Check the saved API key or internet connection.").take(170)
+                            ChatTurn("model", response)).takeLast(8)
+                        response
                     }
                 }
+            } catch (error: Exception) {
+                "Sorry, I couldn't answer yet. " +
+                    (error.message ?: "Please try again.").take(150)
             }
             busy = false
-            say(output)
+            say(output.take(650))
         }
     }
 }
