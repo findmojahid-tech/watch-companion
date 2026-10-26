@@ -31,7 +31,10 @@ class EnglishTaskEngine(context: Context) {
     private fun add(titleValue: String, reminderRequested: Boolean = false): TaskReply {
         val title = clean(titleValue)
         if (title.length < 2) return actionReply("What task would you like me to add?")
-        val updated = tasks() + TaskItem(System.currentTimeMillis(), title)
+        val previous = tasks()
+        val latestId = previous.maxOfOrNull { it.id } ?: 0L
+        val newId = maxOf(System.currentTimeMillis(), latestId + 1L)
+        val updated = previous + TaskItem(newId, title)
         if (!store.save(updated)) return actionReply("Sorry, I couldn't save that task. Please try again.")
         val note = if (reminderRequested) " It's saved as a task, but timed reminders aren't supported yet." else ""
         return TaskReply("Done. I've added: " + title + "." + note, updated)
