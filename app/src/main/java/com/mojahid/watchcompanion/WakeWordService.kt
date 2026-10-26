@@ -281,18 +281,28 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                 val local = engine.tryLocal(text)
                 if (local != null) {
                     local.message
-                } else if (OfflineModelStore(this@WakeWordService).verified()) {
-                    OfflineMomo.answer(this@WakeWordService, text)
                 } else {
                     val key = keys.read()
-                    if (key.isNullOrBlank()) {
-                        "To answer any question without an API key, first download " +
-                            "the free offline Momo brain inside the app."
+                    val offlineReady = OfflineModelStore(this@WakeWordService).verified()
+                    if (!key.isNullOrBlank()) {
+                        try {
+                            val response = GeminiClient.chat(text, conversation, key)
+                            conversation = (conversation + ChatTurn("user", text) +
+                                ChatTurn("model", response)).takeLast(8)
+                            response
+                        } catch (error: Exception) {
+                            if (offlineReady) {
+                                OfflineMomo.answer(this@WakeWordService, text)
+                            } else {
+                                "Gemini connection issue. Open AI Brain and test " +
+                                    "your saved key. " +
+                                    (error.message ?: "").take(90)
+                            }
+                        }
+                    } else if (offlineReady) {
+                        OfflineMomo.answer(this@WakeWordService, text)
                     } else {
-                        val response = GeminiClient.chat(text, conversation, key)
-                        conversation = (conversation + ChatTurn("user", text) +
-                            ChatTurn("model", response)).takeLast(8)
-                        response
+                        "Connect Gemini in AI Brain, or download Momo's offline brain."
                     }
                 }
             } catch (error: Exception) {
