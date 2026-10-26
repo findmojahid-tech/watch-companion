@@ -2,8 +2,9 @@ package com.mojahid.watchcompanion
 
 /**
  * Fixed, device-specific READ/NOTIFY capture plan for the physical Watch 7
- * firmware 4.21 report. No proprietary characteristic WRITE is authorized.
- * Subscriptions only write the standard 0x2902 CCCD, not firmware or dial data.
+ * firmware 4.21 report. An explicitly opted-in, one-shot, six-byte NJJ
+ * product-ID QUERY may target 0b OR 0c; it is NOT a face/firmware upload.
+ * Notification subscriptions only write the standard 0x2902 CCCD.
  */
 object Watch7PassiveProbe {
     const val WINDOW_MILLIS = 30_000L
