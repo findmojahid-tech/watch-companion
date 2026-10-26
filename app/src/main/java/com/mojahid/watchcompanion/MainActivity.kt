@@ -563,7 +563,7 @@ fun MomoApp(
             if (tab == 2) {
                 SectionTitle("Free English AI")
                 DarkCard {
-                    Text("Google Gemini 2.5 Flash-Lite", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Google Gemini 3.5 Flash-Lite", color = Color.White, fontWeight = FontWeight.Bold)
                     Hint("Uses Google's limited free tier. Requires your own free AI Studio API key, " +
                         "a network connection, and available quota. No credit card is required for a " +
                         "free-tier project where eligible.")
