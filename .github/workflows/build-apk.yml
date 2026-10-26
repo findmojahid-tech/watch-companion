@@ -19,15 +19,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Block watch firmware/data writes; allow controlled CCCD subscriptions
+      - name: Forbid OTA writers and restrict experimental W17 watch probes
         shell: bash
         run: |
           set -euo pipefail
-          # Never allow vendor characteristic writes, including OTA/DFU uploads.
-          if grep -R -nE 'writeCharacteristic[[:space:]]*\(' app/src/main/java; then
-            echo "Proprietary BLE characteristic writer detected. Stop."
+          # Exactly two API-version-specific characteristic write calls, ONLY
+          # in DirectWatchClient's one-shot allowlisted NJJ product-ID QUERY.
+          unexpected=$(grep -R -nE 'writeCharacteristic[[:space:]]*\(' app/src/main/java \
+            | grep -v 'DirectWatchClient.kt:' || true)
+          if [ -n "$unexpected" ]; then
+            echo "$unexpected"
+            echo "Unexpected proprietary characteristic writer. Stop."
             exit 1
           fi
+          file=app/src/main/java/com/mojahid/watchcompanion/DirectWatchClient.kt
+          characteristic_count=$(grep -cE 'writeCharacteristic[[:space:]]*\(' "$file" || true)
+          if [ "$characteristic_count" -ne 2 ]; then
+            echo "Unexpected number of watch probe write paths: $characteristic_count"
+            exit 1
+          fi
+          grep -q 'Watch7PassiveProbe.canProbe' "$file"
+          grep -q 'Watch7PassiveProbe.speculativeProductIdQuery' "$file"
+          grep -q 'BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT' "$file"
           # The only allowed descriptor writes are Android notification CCCD
           # subscriptions in DirectWatchClient, which runtime-checks the
           # actual Watch 7 4.21 GATT signature and a fixed allowlist.
