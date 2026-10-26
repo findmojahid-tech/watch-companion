@@ -18,4 +18,14 @@ object WakePhrase {
             command = trimmed.substring(match.range.last + 1).trim()
         )
     }
+    /**
+     * Speech recognizers return hypotheses ordered by confidence, but the first
+     * candidate can omit a short wake word. Prefer an exact wake match when
+     * available; otherwise preserve the highest-ranked phrase for follow-up
+     * commands after Momo has explicitly asked "Yes?".
+     */
+    fun selectHypothesis(hypotheses: List<String>): String =
+        hypotheses.firstOrNull { parse(it).detected }
+            ?: hypotheses.firstOrNull().orEmpty()
+
 }
