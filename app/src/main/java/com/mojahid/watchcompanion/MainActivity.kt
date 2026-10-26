@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     onSurfaceVariant = Muted
                 )
             ) {
-                MomoApp(
+                MomoHome(
                     audio = audio,
                     say = { speak(it) },
                     recognize = { locale, onText, onError -> startRecognizing(locale, onText, onError) }
