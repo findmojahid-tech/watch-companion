@@ -50,6 +50,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     private val prefs by lazy { getSharedPreferences("momo_runtime", Context.MODE_PRIVATE) }
 
     private var recognizer: SpeechRecognizer? = null
+    private var watchBridge: WatchSpeechBridge? = null
     private lateinit var tts: TextToSpeech
     private lateinit var audio: AudioManager
     private var speechReady = false
@@ -94,6 +95,8 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         handler.removeCallbacksAndMessages(null)
         worker.cancel()
         releaseRecognizer()
+        watchBridge?.cancel()
+        watchBridge = null
         tts.stop()
         tts.shutdown()
         runCatching { audio.clearCommunicationDevice() }
@@ -172,6 +175,52 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             PackageManager.PERMISSION_GRANTED) return
         if (!SpeechRecognizer.isRecognitionAvailable(this)) return
 
+        // Watch call HFP audio and BLE data are separate connections. If the
+        // owner chose Watch call, use their Watch mic for wake recognition.
+        // Never silently switch to the Pixel mic when the watch route is lost.
+        val preferredName = prefs.getString("preferred_audio_name", null)
+        if (!preferredName.isNullOrBlank()) {
+            val chosen = runCatching { audio.communicationDevice }.getOrNull()
+            val watchReady = chosen?.productName?.toString() == preferredName &&
+                (chosen.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    chosen.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+            if (!watchReady) {
+                prefs.edit().putString(
+                    "wake_last_status",
+                    "Watch call disconnected. Reconnect the watch audio in Momo."
+                ).apply()
+                routeToPreferredWatch()
+                scheduleListening(5000)
+                return
+            }
+            val locale = prefs.getString("recognition_locale", "en-IN") ?: "en-IN"
+            val bridge = watchBridge ?: WatchSpeechBridge(this, audio).also { watchBridge = it }
+            bridge.start(
+                language = locale,
+                onStatus = { message ->
+                    prefs.edit().putString("wake_last_status", message.take(170)).apply()
+                },
+                onResult = { result ->
+                    errorsInRow = 0
+                    if (!result.capturedFromWatch) {
+                        prefs.edit().putString("wake_last_status",
+                            "Speech input was not captured on Watch call.").apply()
+                        scheduleListening(1300)
+                    } else {
+                        val candidate = result.hypotheses.firstOrNull().orEmpty()
+                        handlePhrase(candidate)
+                    }
+                },
+                onFailure = { message ->
+                    errorsInRow = (errorsInRow + 1).coerceAtMost(8)
+                    prefs.edit().putString("wake_last_status", message.take(170)).apply()
+                    scheduleListening((1100L + errorsInRow * 650L).coerceAtMost(6500L))
+                }
+            )
+            return
+        }
+
+        // Without an opted-in watch profile, support phone microphone mode.
         val sr = SpeechRecognizer.createSpeechRecognizer(this)
         recognizer = sr
         sr.setRecognitionListener(object : RecognitionListener {
