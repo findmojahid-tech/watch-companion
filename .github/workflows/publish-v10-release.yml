@@ -1,0 +1,54 @@
+name: Publish Momo V10 AI Setup APK
+
+on:
+  push:
+    branches: [ feature/momo-v10-ai-face-readiness ]
+    paths:
+      - ".github/workflows/publish-v10-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify build and retrieve artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RESULT=""
+          for attempt in $(seq 1 48); do
+            RESULT=$(gh run view 40386245381 --repo "${{ github.repository }}" --json conclusion -q .conclusion)
+            if [ "$RESULT" = "success" ]; then break; fi
+            if [ "$RESULT" = "failure" ] || [ "$RESULT" = "cancelled" ]; then
+              echo "Android build failed; APK will not be published."
+              exit 1
+            fi
+            sleep 10
+          done
+          test "$RESULT" = "success"
+          mkdir -p release
+          gh run download 40386245381 --repo "${{ github.repository }}" --name WatchCompanion-debug-apk --dir release
+          test -s release/app-debug.apk
+          mv release/app-debug.apk release/Momo-V10-AI-Face-Research.apk
+          file release/Momo-V10-AI-Face-Research.apk
+          sha256sum release/Momo-V10-AI-Face-Research.apk
+
+      - name: Publish direct Android APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v10.0.0-ai-face-research release/Momo-V10-AI-Face-Research.apk \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Momo V10 — Gemini Setup Fix & W17 Dial Compatibility" \
+            --notes "Verified Android preview: main-screen one-tap paste + live Gemini verification, key stored encrypted only on the user's phone, Gemini prioritized over slow local model, direct W17 BLE connection and watch microphone/speaker, visible 320x390 face preparation and read-only vendor GATT property report. IMPORTANT: Direct custom watch-face upload to the W17 is NOT yet implemented, because the vendor dial transfer protocol is unverified. No API keys in this APK, no firmware updates, no unsafe BLE writes. New application ID installs alongside V9. On-device functionality requires Pixel 7 testing." \
+            --prerelease
