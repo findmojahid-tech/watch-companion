@@ -19,7 +19,7 @@
     <application
         android:allowBackup="true"
         android:usesCleartextTraffic="false"
-        android:label="Momo V7"
+        android:label="Momo V8"
         android:theme="@style/Theme.WatchCompanion">
         <activity
             android:name=".MainActivity"
