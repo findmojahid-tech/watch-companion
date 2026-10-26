@@ -7,10 +7,13 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
@@ -34,13 +37,22 @@ data class DirectWatchStatus(
     val vendorCharacteristics: List<String> = emptyList()
 )
 
+/** Ephemeral capture: never uploaded, persisted or sent to another app automatically. */
+data class WatchProtocolCapture(
+    val running: Boolean = false,
+    val status: String = "Not started",
+    val events: List<String> = emptyList(),
+    val receivedPackets: Int = 0
+)
+
 /**
  * One GATT connection owned by Momo itself. Android Bluetooth settings handle
  * OS pairing; the official vendor companion app is NOT involved.
  *
- * Safe operations: discover GATT services, read standard device information
- * and battery. NEVER write a proprietary characteristic, OTA/DFU channel,
- * flash memory, custom dial, or any descriptor.
+ * Safe operations: discover services; read standard/device vendor info; and
+ * with explicit user action subscribe to the exact 4.21 vendor NOTIFY
+ * characteristics via the standard CCCD descriptor only.
+ * NEVER write proprietary characteristic payloads or OTA/DFU data.
  */
 class DirectWatchClient(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
@@ -60,6 +72,16 @@ class DirectWatchClient(private val context: Context) {
     private var retryCount = 0
     private var selectedWatch: BleDeviceRow? = null
     private val readQueue = ArrayDeque<BluetoothGattCharacteristic>()
+    private var standardReadPending = false
+
+    private val captureMutable = MutableStateFlow(WatchProtocolCapture())
+    val protocolCapture: StateFlow<WatchProtocolCapture> = captureMutable
+    private val probeReads = ArrayDeque<BluetoothGattCharacteristic>()
+    private val probeNotifications = ArrayDeque<BluetoothGattCharacteristic>()
+    private var probeReadUuid: UUID? = null
+    private var probeDescriptorUuid: UUID? = null
+    private var probeTimer: Runnable? = null
+    private var probeRunning = false
 
     private fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
@@ -130,9 +152,196 @@ class DirectWatchClient(private val context: Context) {
         handler.postDelayed(runnable, delayMillis)
     }
 
+    private fun addProbeEvent(text: String, packet: Boolean = false) {
+        val previous = captureMutable.value
+        captureMutable.value = previous.copy(
+            events = (previous.events + text.take(260)).takeLast(Watch7PassiveProbe.MAX_EVENTS),
+            receivedPackets = previous.receivedPackets + if (packet) 1 else 0
+        )
+    }
+
+    /**
+     * Uses the existing GATT session. Bounded 30-second read/notify
+     * experiment; never guesses watch commands, edits phone settings or
+     * transmits face/OTA data. The session is closed on exit so standard
+     * notification subscriptions cannot linger, then normal BLE reconnects.
+     */
+    fun startPassiveCapture() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post { startPassiveCapture() }
+            return
+        }
+        if (probeRunning) return
+        val connection = gatt
+        val state = mutable.value
+        if (connection == null || !connected || !state.isConnected) {
+            captureMutable.value = WatchProtocolCapture(status =
+                "Connect Watch 7 via Momo first; capture was not started.")
+            return
+        }
+        val profile = Watch7GattProfile.assess(
+            state.firmware, state.hardware, state.vendorServices, state.vendorCharacteristics
+        )
+        if (!profile.exactFirmware421Profile) {
+            captureMutable.value = WatchProtocolCapture(status =
+                "Capture blocked: this connection does not exactly match the verified " +
+                "Watch 7 firmware 4.21 / hardware 1.0 profile.")
+            return
+        }
+
+        probeReads.clear()
+        probeNotifications.clear()
+        connection.services.forEach { service ->
+            service.characteristics.forEach { characteristic ->
+                val serviceId = service.uuid.toString()
+                val charId = characteristic.uuid.toString()
+                if (Watch7PassiveProbe.canRead(serviceId, charId, characteristic.properties)) {
+                    probeReads.addLast(characteristic)
+                }
+                if (Watch7PassiveProbe.canSubscribe(serviceId, charId, characteristic.properties)) {
+                    probeNotifications.addLast(characteristic)
+                }
+            }
+        }
+        if (probeReads.size != 5 || probeNotifications.size != 8) {
+            captureMutable.value = WatchProtocolCapture(status =
+                "Expected five safe vendor reads and eight notification sources. " +
+                "Observed a different profile; capture blocked.")
+            probeReads.clear()
+            probeNotifications.clear()
+            return
+        }
+
+        probeRunning = true
+        probeReadUuid = null
+        probeDescriptorUuid = null
+        captureMutable.value = WatchProtocolCapture(
+            running = true,
+            status = "Watch-only capture started. Change a face or menu on the WATCH " +
+                "itself during the next 30 seconds. No dial or firmware is sent."
+        )
+        val timer = Runnable {
+            finishPassiveCapture("30-second capture finished; Momo is reconnecting BLE.")
+        }
+        probeTimer = timer
+        handler.postDelayed(timer, Watch7PassiveProbe.WINDOW_MILLIS)
+        advanceProbe()
+    }
+
+    /**
+     * A single GATT operation at a time. Only the standard CCCD 0x2902 is
+     * written, strictly for a characteristic from the fixed allowlist.
+     */
+    @SuppressLint("MissingPermission")
+    @Suppress("DEPRECATION")
+    private fun advanceProbe() {
+        if (!probeRunning || !connected || standardReadPending ||
+            probeReadUuid != null || probeDescriptorUuid != null) return
+        val connection = gatt ?: return
+        while (probeReads.isNotEmpty()) {
+            val ch = probeReads.removeFirst()
+            probeReadUuid = ch.uuid
+            if (runCatching { connection.readCharacteristic(ch) }.getOrDefault(false)) return
+            probeReadUuid = null
+            addProbeEvent("READ " + ch.uuid.toString().substring(0, 8) + " rejected")
+        }
+        val cccdUuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        while (probeNotifications.isNotEmpty()) {
+            val ch = probeNotifications.removeFirst()
+            val serviceId = ch.service?.uuid?.toString().orEmpty()
+            if (!Watch7PassiveProbe.canSubscribe(
+                    serviceId, ch.uuid.toString(), ch.properties)) continue
+            val descriptor = ch.getDescriptor(cccdUuid)
+            if (descriptor == null) {
+                addProbeEvent("NO CCCD for " + ch.uuid.toString().substring(0, 8))
+                continue
+            }
+            val listening = runCatching {
+                connection.setCharacteristicNotification(ch, true)
+            }.getOrDefault(false)
+            if (!listening) {
+                addProbeEvent("NOTIFY local setup rejected for " +
+                    ch.uuid.toString().substring(0, 8))
+                continue
+            }
+            probeDescriptorUuid = ch.uuid
+            // Standard notification subscription only; no vendor packet/OTA.
+            val sent = runCatching {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    connection.writeDescriptor(
+                        descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    ) == BluetoothStatusCodes.SUCCESS
+                } else {
+                    descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    connection.writeDescriptor(descriptor)
+                }
+            }.getOrDefault(false)
+            if (sent) return
+            probeDescriptorUuid = null
+            addProbeEvent("CCCD subscription rejected for " +
+                ch.uuid.toString().substring(0, 8))
+        }
+        captureMutable.value = captureMutable.value.copy(
+            status = "Vendor reads finished. Watching for BLE notifications; " +
+                "interact with the watch until the 30-second capture ends."
+        )
+    }
+
+    fun stopPassiveCapture() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post { stopPassiveCapture() }
+            return
+        }
+        if (probeRunning) finishPassiveCapture("Capture stopped; restoring direct watch BLE.")
+    }
+
+    private fun finishPassiveCapture(message: String) {
+        if (!probeRunning) return
+        probeRunning = false
+        probeTimer?.let(handler::removeCallbacks)
+        probeTimer = null
+        captureMutable.value = captureMutable.value.copy(running = false, status = message)
+        session++ // Discard all late GATT callbacks from the lab link.
+        closeLink() // Disconnect clears temporary CCCD subscriptions on the watch.
+        emit(mutable.value.copy(
+            state = "Disconnected", isConnected = false, isConnecting = false,
+            message = "Watch-only capture ended. Restoring Momo Bluetooth connection."
+        ))
+        scheduleRetry("Watch-only capture completed.")
+    }
+
+    private fun logProbeNotification(
+        connectionId: Int,
+        connection: BluetoothGatt,
+        ch: BluetoothGattCharacteristic,
+        bytes: ByteArray
+    ) {
+        handler.post {
+            if (connectionId != session || connection !== gatt || !probeRunning) return@post
+            val serviceId = ch.service?.uuid?.toString().orEmpty()
+            if (!Watch7PassiveProbe.canSubscribe(
+                    serviceId, ch.uuid.toString(), ch.properties)) return@post
+            addProbeEvent(Watch7PassiveProbe.entry("NOTIFY", ch.uuid.toString(), bytes), true)
+        }
+    }
+
     @SuppressLint("MissingPermission")
     private fun closeLink() {
         cancelTimeout()
+        probeTimer?.let(handler::removeCallbacks)
+        probeTimer = null
+        if (probeRunning) {
+            probeRunning = false
+            captureMutable.value = captureMutable.value.copy(
+                running = false,
+                status = "Capture stopped because the watch connection closed."
+            )
+        }
+        probeReads.clear()
+        probeNotifications.clear()
+        probeReadUuid = null
+        probeDescriptorUuid = null
+        standardReadPending = false
         readQueue.clear()
         connected = false
         val old = gatt
@@ -287,6 +496,43 @@ class DirectWatchClient(private val context: Context) {
             ) {
                 readDone(current, characteristic, value, status)
             }
+
+            override fun onDescriptorWrite(
+                connection: BluetoothGatt,
+                descriptor: BluetoothGattDescriptor,
+                status: Int
+            ) {
+                handler.post {
+                    if (current != session || connection !== gatt || !probeRunning ||
+                        probeDescriptorUuid != descriptor.characteristic.uuid) return@post
+                    addProbeEvent("CCCD " +
+                        descriptor.characteristic.uuid.toString().substring(0, 8) +
+                        if (status == BluetoothGatt.GATT_SUCCESS) " subscribed"
+                        else " error " + status)
+                    probeDescriptorUuid = null
+                    advanceProbe()
+                }
+            }
+
+            @Suppress("DEPRECATION")
+            override fun onCharacteristicChanged(
+                connection: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic
+            ) {
+                if (Build.VERSION.SDK_INT < 33) {
+                    logProbeNotification(
+                        current, connection, characteristic, characteristic.value ?: byteArrayOf()
+                    )
+                }
+            }
+
+            override fun onCharacteristicChanged(
+                connection: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                value: ByteArray
+            ) {
+                logProbeNotification(current, connection, characteristic, value)
+            }
         }
         val opened = runCatching {
             device.connectGatt(context.applicationContext, false, callback, BluetoothDevice.TRANSPORT_LE)
@@ -313,6 +559,23 @@ class DirectWatchClient(private val context: Context) {
     ) {
         handler.post {
             if (connectionId != session || !connected) return@post
+            if (probeRunning && probeReadUuid == characteristic.uuid) {
+                probeReadUuid = null
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    addProbeEvent(
+                        Watch7PassiveProbe.entry(
+                            "READ", characteristic.uuid.toString(), data
+                        )
+                    )
+                } else {
+                    addProbeEvent("READ " +
+                        characteristic.uuid.toString().substring(0, 8) +
+                        " GATT error " + status)
+                }
+                advanceProbe()
+                return@post
+            }
+            standardReadPending = false
             if (status == BluetoothGatt.GATT_SUCCESS && data.isNotEmpty()) {
                 val id = characteristic.uuid.toString().substring(4, 8).lowercase(Locale.ROOT)
                 val stringValue = String(data, Charsets.UTF_8).trim().trim('\u0000').take(70)
@@ -335,8 +598,12 @@ class DirectWatchClient(private val context: Context) {
         while (readQueue.isNotEmpty()) {
             val char = readQueue.removeFirst()
             val success = runCatching { gatt?.readCharacteristic(char) == true }.getOrDefault(false)
-            if (success) return
+            if (success) {
+                standardReadPending = true
+                return
+            }
         }
+        if (probeRunning) advanceProbe()
     }
 
     private fun fail(connectionId: Int, message: String) {
