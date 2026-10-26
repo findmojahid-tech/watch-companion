@@ -509,8 +509,10 @@ fun MomoApp(
 
                 DarkCard {
                     SectionTitle("BLE Watch Lab")
-                    Hint("This is a temporary read-only inspection, NOT the Bluetooth call-audio link. " +
-                        "A BLE disconnect after reading services is normal and isn't proof audio disconnected.")
+                    Hint("Read-only protocol audit: reads standard manufacturer / firmware details " +
+                        "and characteristic capabilities. It never sends vendor commands or updates firmware.")
+                    Hint("The Goodix A6ED OTA/DFU service is NOT a watch-face upload interface. " +
+                        "Never use it for experimenting with uploads.")
                     Text(bleStatus, color = Muted, style = MaterialTheme.typography.bodyMedium)
                     Button(onClick = {
                         bleResult = null
@@ -532,9 +534,26 @@ fun MomoApp(
                     bleResult?.let { result ->
                         Text("Services from: " + result.device.name, color = Color.White,
                             fontWeight = FontWeight.Bold)
-                        result.services.take(35).forEach { line ->
+                        val details = result.services.filter { line ->
+                            line.contains("Firmware revision:") ||
+                                line.contains("Hardware revision:") ||
+                                line.contains("Software revision:") ||
+                                line.contains("Manufacturer:") ||
+                                line.contains("Device name:") ||
+                                line.contains("Battery level:")
+                        }
+                        if (details.isNotEmpty()) {
+                            Text("Device identity (read-only)", color = Cyan, fontWeight = FontWeight.Bold)
+                            details.forEach { line ->
+                                Text(line, color = Color.White, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        Text("GATT services and properties", color = Cyan, fontWeight = FontWeight.SemiBold)
+                        result.services.filterNot { details.contains(it) }.take(48).forEach { line ->
                             Text(line, color = Muted, style = MaterialTheme.typography.bodySmall)
                         }
+                        Hint("A custom WRITE characteristic alone does NOT prove watch-face support. " +
+                            "Use Copy full BLE report for all services and read results.")
                         OutlinedButton(onClick = {
                             val report = "Device: " + result.device.name + "\n" +
                                 result.note + "\n" + result.services.joinToString("\n")
