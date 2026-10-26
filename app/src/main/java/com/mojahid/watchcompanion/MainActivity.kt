@@ -93,6 +93,7 @@ fun CompanionApp(
     var tasks by remember { mutableStateOf(listOf<TaskItem>()) }
     var face by remember { mutableStateOf(FaceState.IDLE) }
     var transcript by remember { mutableStateOf("Ready") }
+    var lastHeard by remember { mutableStateOf("") }
     var watchDevices by remember { mutableStateOf<List<AudioDeviceInfo>>(emptyList()) }
     var selectedDevice by remember { mutableStateOf<AudioDeviceInfo?>(null) }
 
@@ -122,49 +123,148 @@ fun CompanionApp(
         onSpeak(text)
     }
 
-    fun processCommand(raw: String) {
+    fun normalizeCommand(value: String): String =
+        value.lowercase()
+            .replace("কাজ", " task ")
+            .replace("টাস্ক", " task ")
+            .replace("যোগ", " add ")
+            .replace("করো", " koro ")
+            .replace("কর", " koro ")
+            .replace("বাকি", " baki ")
+            .replace("শেষ", " done ")
+            .replace("হয়ে গেছে", " done ")
+            .replace("হয়ে গেছে", " done ")
+            .replace("পেন্ডিং", " pending ")
+            .replace(Regex("[^a-z0-9\\u0980-\\u09FF ]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+    fun processCommand(raw: String): Boolean {
         val text = raw.trim()
-        if (text.isBlank()) return
+        if (text.isBlank()) return false
         face = FaceState.THINKING
-        val lower = text.lowercase()
+        val lower = normalizeCommand(text)
+
+        val asksPending =
+            lower.contains("ki ki baki") ||
+            lower.contains("ki baki") ||
+            lower.contains("what is pending") ||
+            lower.contains("pending task") ||
+            lower == "pending" ||
+            lower == "baki" ||
+            (lower.contains("baki") && (lower.contains("task") || lower.contains("kaj")))
+
+        val asksReopen =
+            lower.contains("abar pending") ||
+            lower.contains("reopen") ||
+            lower.contains("back to pending")
+
+        val asksDone =
+            lower.contains(" done") ||
+            lower.endsWith("done") ||
+            lower.contains("complete") ||
+            lower.contains("finished") ||
+            lower.endsWith(" dan") ||
+            lower.contains(" mark done")
+
+        val asksAdd =
+            lower.contains("add koro") ||
+            lower.contains("ad koro") ||
+            lower.contains("task add") ||
+            lower.contains("add task") ||
+            lower.contains("task dao") ||
+            lower.contains("task rakho") ||
+            lower.contains("list e add") ||
+            lower.contains("liste add") ||
+            lower.startsWith("add ")
 
         when {
-            lower.contains("ki ki baki") || lower.contains("what is pending") || lower == "pending" -> {
+            asksPending -> {
                 val pending = tasks.filterNot { it.done }
                 if (pending.isEmpty()) reply("Kono task baki nei.")
                 else reply("Baki ache: " + pending.joinToString(", ") { it.title })
+                return true
             }
-            lower.contains("abar pending") || lower.contains("reopen") -> {
-                val name = text.substringBefore("abar pending", text).substringBefore("reopen", text).trim()
-                val match = tasks.lastOrNull { it.title.contains(name, true) || name.contains(it.title, true) }
+
+            asksReopen -> {
+                val name = text
+                    .replace(Regex("(?i)abar\\s+pending"), "")
+                    .replace(Regex("(?i)reopen"), "")
+                    .replace(Regex("(?i)back\\s+to\\s+pending"), "")
+                    .trim(' ', '.', ',')
+                val match = tasks.lastOrNull {
+                    it.title.contains(name, true) || name.contains(it.title, true)
+                }
                 if (match == null) reply("Task ta khuje pai ni.", FaceState.CONFUSED)
                 else {
                     tasks = tasks.map { if (it.id == match.id) it.copy(done = false) else it }
                     reply("${match.title} abar pending korechi.")
                 }
+                return true
             }
-            lower.endsWith("done") || lower.contains(" done") -> {
-                val name = text.replace(Regex("(?i)\\bdone\\b"), "").trim()
-                val match = tasks.lastOrNull { it.title.contains(name, true) || name.contains(it.title, true) }
+
+            asksDone -> {
+                val name = text
+                    .replace(Regex("(?i)\\bdone\\b"), "")
+                    .replace(Regex("(?i)\\bcomplete(d)?\\b"), "")
+                    .replace(Regex("(?i)\\bfinished\\b"), "")
+                    .replace(Regex("(?i)\\bdan\\b"), "")
+                    .replace(Regex("(?i)mark\\s+done"), "")
+                    .trim(' ', '.', ',')
+                val match = tasks.lastOrNull {
+                    it.title.contains(name, true) || name.contains(it.title, true)
+                }
                 if (match == null) reply("Kon task ta done bujhte parini.", FaceState.CONFUSED)
                 else {
                     tasks = tasks.map { if (it.id == match.id) it.copy(done = true) else it }
                     reply("${match.title} done mark korechi.")
                 }
+                return true
             }
-            lower.contains("add koro") || lower.contains("task add") || lower.contains("add task") -> {
+
+            asksAdd -> {
                 val title = text
-                    .replace(Regex("(?i)task add koro"), "")
-                    .replace(Regex("(?i)add task"), "")
-                    .replace(Regex("(?i)add koro"), "")
+                    .replace(Regex("(?i)task\\s+add\\s+koro"), "")
+                    .replace(Regex("(?i)add\\s+task"), "")
+                    .replace(Regex("(?i)add\\s+koro"), "")
+                    .replace(Regex("(?i)ad\\s+koro"), "")
+                    .replace(Regex("(?i)task\\s+dao"), "")
+                    .replace(Regex("(?i)task\\s+rakho"), "")
+                    .replace(Regex("(?i)list(e)?\\s+add"), "")
+                    .replace(Regex("(?i)^add\\s+"), "")
+                    .replace("যোগ", "")
+                    .replace("করো", "")
+                    .replace("কর", "")
+                    .replace("টাস্ক", "")
+                    .replace("কাজ", "")
                     .trim(' ', '.', ',')
+
                 if (title.isBlank()) reply("Task-er nam bolo.", FaceState.CONFUSED)
                 else {
                     tasks = tasks + TaskItem(System.currentTimeMillis(), title)
                     reply("$title task add korechi.")
                 }
+                return true
             }
-            else -> reply("Command ta bujhte parini.", FaceState.CONFUSED)
+
+            else -> return false
+        }
+    }
+
+    fun processSpeechCandidates(candidates: List<String>) {
+        if (candidates.isEmpty()) {
+            reply("Kichu shunte paini.", FaceState.CONFUSED)
+            return
+        }
+
+        lastHeard = candidates.first()
+        val matched = candidates.firstOrNull { processCommand(it) != false }
+        if (matched == null) {
+            transcript = "Command ta bujhte parini."
+            face = FaceState.CONFUSED
+            onSpeak("Command ta bujhte parini.")
+        } else {
+            lastHeard = matched
         }
     }
 
@@ -178,6 +278,9 @@ fun CompanionApp(
             Column(Modifier.weight(1f)) {
                 Text("Watch Companion", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(transcript, color = Color(0xFFB8B8C4))
+                if (lastHeard.isNotBlank()) {
+                    Text("Heard: $lastHeard", color = Color(0xFF7D7D8A), style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
 
@@ -218,9 +321,12 @@ fun CompanionApp(
         }
 
         PushToTalkButton(
-            onResult = {
-                transcript = it
-                processCommand(it)
+            onResult = { candidates ->
+                if (candidates.isNotEmpty()) {
+                    lastHeard = candidates.first()
+                    transcript = candidates.first()
+                }
+                processSpeechCandidates(candidates)
             },
             onState = { face = it },
             createRecognizer = createRecognizer
@@ -251,7 +357,7 @@ fun CompanionApp(
 
 @Composable
 fun PushToTalkButton(
-    onResult: (String) -> Unit,
+    onResult: (List<String>) -> Unit,
     onState: (FaceState) -> Unit,
     createRecognizer: () -> SpeechRecognizer
 ) {
@@ -282,8 +388,8 @@ fun PushToTalkButton(
                     }
                     override fun onResults(results: Bundle?) {
                         listening = false
-                        val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        onResult(list?.firstOrNull().orEmpty())
+                        val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                        onResult(list)
                     }
                     override fun onPartialResults(partialResults: Bundle?) {}
                     override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -292,6 +398,7 @@ fun PushToTalkButton(
                 val intent = android.content.Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-BD")
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
                 }
                 sr.startListening(intent)
