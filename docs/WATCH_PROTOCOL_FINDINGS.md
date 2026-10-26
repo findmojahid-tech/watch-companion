@@ -160,3 +160,41 @@ alone do not authorize using a generic Goodix DFU tool or packets; the
 firmware may use another revision/variant of the OTA profile. Treat these
 as **OTA-associated unknown writers**, not confirmed dial commands. Keep
 all writes disabled.
+
+## Opt-in passive vendor channel capture (experimental branch)
+
+`integration/momo-final` now contains a *user-initiated 30-second protocol
+capture* built into Momo's existing BLE session, with a **firmware 4.21 /
+hardware 1.0 exact profile check**. This is source implementation, not a
+claim that it has been exercised on the owner's physical watch.
+
+- READ from the five `6e400005` through `6e400009` characteristics on
+  service `6e400004`. Reads may return opaque binary information.
+- Subscribe to NOTIFY only on those five plus the three `6e40000b`,
+  `6e40000c`, `6e40000d` characteristics on service `6e40000a`.
+  **These subscriptions require a standard Bluetooth CCCD 0x2902 write**
+  with `01 00`, which changes temporary notification configuration on
+  the watch for that connection. No arbitrary payloads are sent.
+- After at most 30 seconds, close the temporary GATT connection to remove
+  subscriptions, then request Momo's ordinary direct BLE reconnect. Capture
+  can be stopped immediately. Timeouts, failed reads and missing CCCDs are
+  recorded without attempting unknown command bytes.
+- Record no more than 48 lines; display up to 36 bytes per payload. Captures
+  are held in app memory only and can be copied **at the owner's request**.
+  Bluetooth messages can contain health/personal data: review before sharing.
+- OTA service `a6ed0401` is excluded from every read/notify operation in
+  this experiment, not merely from transmission. No OTA or proprietary
+  characteristic writes, bootloader unlocks, Android root, new permissions,
+  or phone firmware changes.
+
+This observer may reveal actual vendor characteristic values and
+notifications (for example, when changing a dial directly on the watch).
+**It does not identify how to upload a face, and silence does not prove
+that the dial protocol is absent.** To send a face, a separately verified
+device-specific transfer scheme is still necessary.
+
+Previously documented read-only Watch Lab and V10 APK behavior remain
+unchanged; the new capture controls exist in branch source only until an
+approved consolidated release. The Android CI static safety check now allows
+only the two code paths for standard 0x2902 CCCD subscription; it rejects
+new characteristic write APIs and descriptor writers elsewhere.
