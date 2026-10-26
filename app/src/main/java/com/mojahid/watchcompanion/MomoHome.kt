@@ -826,7 +826,10 @@ fun MomoHome(
                 "Only standard BLE notification subscriptions are written. " +
                 "No dial, proprietary command, OTA, or phone setting is changed.")
             OutlinedButton(
-                onClick = { directWatch.startPassiveCapture() },
+                onClick = {
+                    watchProbeAccepted = false
+                    directWatch.startPassiveCapture()
+                },
                 enabled = watch.isConnected && !watchProbe.running,
                 modifier = Modifier.fillMaxWidth()
             ) {
