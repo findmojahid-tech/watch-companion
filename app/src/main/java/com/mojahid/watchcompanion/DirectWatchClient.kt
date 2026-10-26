@@ -55,6 +55,10 @@ class DirectWatchClient(private val context: Context) {
     private var session = 0
     private var connected = false
     private var timeout: Runnable? = null
+    private var retry: Runnable? = null
+    private var autoReconnect = false
+    private var retryCount = 0
+    private var selectedWatch: BleDeviceRow? = null
     private val readQueue = ArrayDeque<BluetoothGattCharacteristic>()
 
     private fun hasPermission(): Boolean =
@@ -93,6 +97,39 @@ class DirectWatchClient(private val context: Context) {
         timeout = null
     }
 
+    private fun cancelRetry() {
+        retry?.let { handler.removeCallbacks(it) }
+        retry = null
+    }
+
+    private fun scheduleRetry(message: String) {
+        val watch = selectedWatch ?: return
+        if (!autoReconnect || !hasPermission() || adapter?.isEnabled != true) return
+        if (retryCount >= 3) {
+            emit(mutable.value.copy(
+                state = "Disconnected", isConnecting = false, isConnected = false,
+                message = message + " Automatic reconnect paused after 3 attempts. Tap Connect."
+            ))
+            return
+        }
+        retryCount++
+        val delayMillis = when (retryCount) { 1 -> 2000L; 2 -> 5000L; else -> 10000L }
+        emit(mutable.value.copy(
+            state = "Reconnecting", isConnecting = false, isConnected = false,
+            message = "Watch link lost. Retrying " + retryCount + "/3 in " +
+                (delayMillis / 1000L) + " seconds."
+        ))
+        val currentSession = session
+        val runnable = Runnable {
+            retry = null
+            if (autoReconnect && currentSession == session) {
+                connectInternal(watch, userInitiated = false)
+            }
+        }
+        retry = runnable
+        handler.postDelayed(runnable, delayMillis)
+    }
+
     @SuppressLint("MissingPermission")
     private fun closeLink() {
         cancelTimeout()
@@ -105,6 +142,15 @@ class DirectWatchClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun connect(row: BleDeviceRow) {
+        retryCount = 0
+        autoReconnect = true
+        selectedWatch = row
+        connectInternal(row, userInitiated = true)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun connectInternal(row: BleDeviceRow, userInitiated: Boolean) {
+        cancelRetry()
         if (!hasPermission()) {
             emit(DirectWatchStatus(
                 state = "Permission needed",
@@ -133,7 +179,8 @@ class DirectWatchClient(private val context: Context) {
         val friendlyName = row.name.removeSuffix(" [paired]").removeSuffix(" [last seen]")
         emit(DirectWatchStatus(
             state = "Connecting...", isConnecting = true, deviceName = friendlyName,
-            message = "Opening a direct Bluetooth connection to " + friendlyName
+            message = (if (userInitiated) "Opening " else "Reopening ") +
+                "a direct Bluetooth connection to " + friendlyName
         ))
         val callback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(
@@ -171,6 +218,7 @@ class DirectWatchClient(private val context: Context) {
                         return@post
                     }
                     cancelTimeout()
+                    retryCount = 0
                     val manufacturerUuid = UUID.fromString("00002a29-0000-1000-8000-00805f9b34fb")
                     val firmwareUuid = UUID.fromString("00002a26-0000-1000-8000-00805f9b34fb")
                     val hardwareUuid = UUID.fromString("00002a27-0000-1000-8000-00805f9b34fb")
@@ -297,6 +345,7 @@ class DirectWatchClient(private val context: Context) {
             state = "Disconnected", isConnecting = false, isConnected = false,
             message = message
         ))
+        scheduleRetry(message)
     }
 
     fun reconnect() {
@@ -309,6 +358,8 @@ class DirectWatchClient(private val context: Context) {
     }
 
     fun disconnect() {
+        autoReconnect = false
+        cancelRetry()
         session++
         closeLink()
         emit(DirectWatchStatus(
@@ -317,6 +368,8 @@ class DirectWatchClient(private val context: Context) {
     }
 
     fun close() {
+        autoReconnect = false
+        cancelRetry()
         session++
         closeLink()
         handler.removeCallbacksAndMessages(null)
