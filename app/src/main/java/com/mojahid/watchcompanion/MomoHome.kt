@@ -144,7 +144,7 @@ fun MomoHome(
         answer = output
         status = output
         face = FaceState.HAPPY
-        say(output.take(550))
+        say(output.take(1600))
     }
 
     fun ask(raw: String) {
