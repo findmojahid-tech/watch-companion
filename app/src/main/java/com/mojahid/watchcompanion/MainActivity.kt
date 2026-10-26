@@ -264,8 +264,7 @@ fun MomoApp(
     }
 
     fun refreshAudio() {
-        val canConnect = ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
-            == PackageManager.PERMISSION_GRANTED
+        val canConnect = ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
         if (!canConnect) {
             audioStatus = "Allow Nearby devices permission, then refresh."
             return
