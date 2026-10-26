@@ -60,7 +60,8 @@ private fun MomoNote(text: String) {
 fun MomoHome(
     audio: AudioManager,
     say: (String) -> Unit,
-    recognize: (String, (List<String>) -> Unit, (String) -> Unit) -> Unit
+    recognize: (String, (List<String>) -> Unit, (String) -> Unit) -> Unit,
+    recognizeWatch: (String, (String) -> Unit, (WatchSpeechResult) -> Unit, (String) -> Unit) -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { context.getSharedPreferences("momo_runtime", Context.MODE_PRIVATE) }
@@ -85,6 +86,10 @@ fun MomoHome(
     var chosenAudio by remember { mutableStateOf<AudioDeviceInfo?>(null) }
     var audioInfo by remember { mutableStateOf("Connect the Watch call Bluetooth profile.") }
     var micTestRunning by remember { mutableStateOf(false) }
+    var watchSpeechRunning by remember { mutableStateOf(false) }
+    var watchSpeechStatus by remember {
+        mutableStateOf("English recognition from the watch microphone isn't tested yet.")
+    }
     var micTestStatus by remember {
         mutableStateOf("Speaker confirmed by user. Microphone source still needs testing.")
     }
@@ -535,6 +540,60 @@ fun MomoHome(
                 Text(if (micTestRunning) "Testing watch mic..." else "Test watch microphone (3 sec)")
             }
             MomoNote(micTestStatus)
+
+            Button(
+                onClick = {
+                    if (watchSpeechRunning || wakeEnabled || micTestRunning) return@Button
+                    watchSpeechRunning = true
+                    watchSpeechStatus = "Speak into Watch 7 for up to 9 seconds. " +
+                        "Try: What is the capital of Bangladesh?"
+                    val accent = prefs.getString("recognition_locale", "en-IN") ?: "en-IN"
+                    recognizeWatch(
+                        accent,
+                        { progress ->
+                            watchSpeechStatus = progress
+                        },
+                        { result ->
+                            watchSpeechRunning = false
+                            val spoken = result.hypotheses.firstOrNull().orEmpty()
+                            val route = result.captureRoute
+                            if (!result.capturedFromWatch) {
+                                watchSpeechStatus = "Input source not confirmed as watch: " + route +
+                                    ". No AI command sent. Reconnect Watch call and retry."
+                                face = FaceState.CONFUSED
+                            } else if (spoken.isBlank()) {
+                                watchSpeechStatus = "Watch microphone was selected, " +
+                                    "but no English text was recognized. Please retry."
+                                face = FaceState.CONFUSED
+                            } else {
+                                watchSpeechStatus = "Heard through test: " + spoken +
+                                    "\nAudioRecord route: " + route +
+                                    "\nAndroid recognition may ignore injected input " +
+                                    "on some phones. Check that the phone was far away."
+                                val clean = spoken.replace(
+                                    Regex("^(?:(?:hey|hi|hello)\\s+)?momo[\\s,.:!?]*",
+                                        RegexOption.IGNORE_CASE), ""
+                                ).trim().ifBlank { spoken }
+                                ask(clean)
+                            }
+                        },
+                        { error ->
+                            watchSpeechRunning = false
+                            watchSpeechStatus = "Watch speech test: " + error
+                            face = FaceState.CONFUSED
+                        }
+                    )
+                },
+                enabled = !wakeEnabled && !watchSpeechRunning && !micTestRunning && !voiceBusy && !isBusy,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (watchSpeechRunning) "Listening through watch..." else
+                    "Ask Momo using watch microphone")
+            }
+            MomoNote(watchSpeechStatus)
+            MomoNote("The watch mic is explicitly captured for this test. " +
+                "Android speech services may ignore injected audio; successful " +
+                "English recognition with the phone kept away is the next check.")
             if (wakeEnabled) {
                 MomoNote("Turn off Momo Listening before the mic test so the " +
                     "two microphone sessions don't compete.")
