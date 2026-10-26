@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#070b14"><title>MOMO Face Studio</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#070b14;color:#eaf7ff}
+*{box-sizing:border-box}body{margin:0;min-height:100svh;display:flex;justify-content:center;align-items:center;background:radial-gradient(ellipse at 50% 25%,#1d3149,#080e1a 60%,#070b14)}
+main{width:min(100%,490px);padding:24px 20px 38px;text-align:center}h1{font-size:14px;letter-spacing:.4em;color:#91cce7;margin:0 0 8px}p{color:#a7bbcf;font-size:13px;line-height:1.5}
+.watch{width:min(82vw,320px);height:auto;aspect-ratio:320/390;margin:24px auto 16px;position:relative;display:grid;place-items:center;border-radius:66px;background:linear-gradient(155deg,#202b39,#090d15 42%,#131e2d);border:8px solid #344456;box-shadow:0 0 0 3px #0a111b,0 22px 80px #000a, inset 0 0 20px #0d1325;overflow:hidden}
+.watch::before{content:"";position:absolute;inset:7px;border:1px solid #46586870;border-radius:53px;pointer-events:none}
+.face{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center}
+.eyes{display:flex;gap:38px;align-items:center;height:90px;transform:translateY(-8px)}.eye{width:73px;height:53px;border-radius:26px;background:#88e5ff;box-shadow:0 0 21px #4fcfff77,0 0 45px #4fcfff25;transition:height .22s,border-radius .22s,transform .22s,background .2s}
+.mouth{width:33px;height:19px;border:0;border-bottom:6px solid #88e5ff;border-radius:0 0 50% 50%;transition:all .2s;margin-top:12px}
+.mark{position:absolute;bottom:42px;letter-spacing:.38em;font-size:13px;font-weight:600;color:#8cbed0}.label{position:absolute;top:30px;font-size:11px;letter-spacing:.25em;color:#638da1}
+.mode-listening .eye{height:66px;border-radius:32px}.mode-thinking .eye:first-child{height:13px;transform:rotate(-9deg)}.mode-thinking .eye:last-child{transform:translateY(8px)}.mode-happy .eye{height:22px;border-radius:100% 100% 16% 16%;transform:translateY(-5px)}.mode-happy .mouth{width:48px;height:23px}
+.mode-speaking .mouth{border:5px solid #88e5ff;border-radius:45%;width:22px;height:25px;animation:talk .35s ease-in-out infinite alternate}.mode-sleeping .eye{height:5px;box-shadow:0 0 10px #4fcfff44}
+.mode-idle .eyes{animation:breathe 4s ease-in-out infinite}
+.blink .eye{height:3px!important;border-radius:9px!important}
+@keyframes talk{to{height:10px;width:35px}}@keyframes breathe{50%{transform:translateY(-11px)}}
+.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;max-width:375px;margin:20px auto}.controls button{background:#182b3d;color:#def7ff;border:1px solid #35546a;border-radius:13px;padding:12px 3px;cursor:pointer;font-weight:600}.controls button[aria-pressed="true"]{background:#28708c;border-color:#80dafa;color:white}
+.small{font-size:12px;color:#9db3c7}.notice{margin:18px auto 0;max-width:375px;padding:11px;border:1px solid #304356;border-radius:12px;background:#0e1927}
+</style></head><body><main><h1>MOMO FACE STUDIO</h1><p>Original expressive face • interactive prototype</p>
+<div class="watch mode-idle" id="watch" role="img" aria-label="Animated Momo face, idle"><div class="face"><div class="label" id="modeLabel">IDLE</div><div class="eyes"><div class="eye"></div><div class="eye"></div></div><div class="mouth"></div><div class="mark">M O M O</div></div></div>
+<div class="controls" id="controls">
+<button data-mode="idle" aria-pressed="true">😊 Idle</button><button data-mode="listening" aria-pressed="false">🎧 Listen</button><button data-mode="thinking" aria-pressed="false">💭 Think</button>
+<button data-mode="speaking" aria-pressed="false">🗣️ Speak</button><button data-mode="happy" aria-pressed="false">✨ Happy</button><button data-mode="sleeping" aria-pressed="false">🌙 Sleep</button>
+</div><p class="small">Blinking works automatically in idle mode. Tap a state to see Momo react.</p>
+<p class="notice">This is a real interactive visual prototype, <strong>not a dial uploaded to Watch 7</strong>. Firmware 4.21 face-transfer support remains unverified. No Bluetooth writes are performed.</p></main>
+<script>
+const watch=document.querySelector('#watch'), label=document.querySelector('#modeLabel');
+let mode='idle';
+document.querySelectorAll('[data-mode]').forEach(button=>button.addEventListener('click',()=>{mode=button.dataset.mode;watch.className='watch mode-'+mode;label.textContent=mode.toUpperCase();watch.setAttribute('aria-label','Animated Momo face, '+mode);document.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)))}));
+setInterval(()=>{if(mode!=='idle')return;watch.classList.add('blink');setTimeout(()=>watch.classList.remove('blink'),165)},4600);
+</script></body></html>
