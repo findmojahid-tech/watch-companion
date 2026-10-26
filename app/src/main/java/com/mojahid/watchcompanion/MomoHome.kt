@@ -84,6 +84,10 @@ fun MomoHome(
     var audioChoices by remember { mutableStateOf<List<AudioDeviceInfo>>(emptyList()) }
     var chosenAudio by remember { mutableStateOf<AudioDeviceInfo?>(null) }
     var audioInfo by remember { mutableStateOf("Connect the Watch call Bluetooth profile.") }
+    var micTestRunning by remember { mutableStateOf(false) }
+    var micTestStatus by remember {
+        mutableStateOf("Speaker confirmed by user. Microphone source still needs testing.")
+    }
     var showAdvanced by remember { mutableStateOf(false) }
     var showCloud by remember { mutableStateOf(false) }
     var showTasks by remember { mutableStateOf(false) }
@@ -503,6 +507,38 @@ fun MomoHome(
                 }, modifier = Modifier.weight(1f)) { Text("Test speaker") }
             }
             MomoNote("A voice response can use Watch call without keeping BLE diagnostics open.")
+            HorizontalDivider(color = Color(0xFF344155))
+            Text("Watch microphone verification", color = Color.White,
+                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            MomoNote("Test is 3 seconds. Keep the Pixel 7 away, speak close to your watch, " +
+                "and look for WATCH MICROPHONE CONFIRMED. No voice audio is saved or uploaded.")
+            Button(
+                onClick = {
+                    micTestRunning = true
+                    micTestStatus = "Checking watch microphone for 3 seconds. " +
+                        "Speak near your watch, not your phone..."
+                    scope.launch {
+                        try {
+                            val result = WatchMicrophoneProbe.test(context, audio)
+                            micTestStatus = result.title + "\n" + result.detail
+                        } catch (error: Exception) {
+                            micTestStatus = "Microphone diagnostic failed: " +
+                                (error.message ?: "Try once more.")
+                        } finally {
+                            micTestRunning = false
+                        }
+                    }
+                },
+                enabled = !wakeEnabled && !voiceBusy && !isBusy && !micTestRunning,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (micTestRunning) "Testing watch mic..." else "Test watch microphone (3 sec)")
+            }
+            MomoNote(micTestStatus)
+            if (wakeEnabled) {
+                MomoNote("Turn off Momo Listening before the mic test so the " +
+                    "two microphone sessions don't compete.")
+            }
         }
 
         MomoPanel {
