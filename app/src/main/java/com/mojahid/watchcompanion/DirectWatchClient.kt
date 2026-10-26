@@ -145,6 +145,7 @@ class DirectWatchClient(private val context: Context) {
         retryCount = 0
         autoReconnect = true
         selectedWatch = row
+        prefs.edit().putBoolean("connect_enabled", true).apply()
         connectInternal(row, userInitiated = true)
     }
 
@@ -187,7 +188,7 @@ class DirectWatchClient(private val context: Context) {
                 connection: BluetoothGatt, status: Int, newState: Int
             ) {
                 handler.post {
-                    if (current != session) return@post
+                    if (current != session || connection !== gatt) return@post
                     if (status == BluetoothGatt.GATT_SUCCESS &&
                         newState == BluetoothProfile.STATE_CONNECTED) {
                         connected = true
@@ -212,7 +213,7 @@ class DirectWatchClient(private val context: Context) {
 
             override fun onServicesDiscovered(connection: BluetoothGatt, status: Int) {
                 handler.post {
-                    if (current != session) return@post
+                    if (current != session || connection !== gatt) return@post
                     if (status != BluetoothGatt.GATT_SUCCESS) {
                         fail(current, "Could not discover services (code " + status + ").")
                         return@post
@@ -348,6 +349,13 @@ class DirectWatchClient(private val context: Context) {
         scheduleRetry(message)
     }
 
+    fun reconnectIfEnabled() {
+        if (state.value.isConnected || state.value.isConnecting) return
+        if (!prefs.getBoolean("connect_enabled", false)) return
+        if (!hasPermission() || adapter?.isEnabled != true) return
+        knownWatch()?.let { connect(it) }
+    }
+
     fun reconnect() {
         val saved = knownWatch()
         if (saved != null) connect(saved)
@@ -358,6 +366,7 @@ class DirectWatchClient(private val context: Context) {
     }
 
     fun disconnect() {
+        prefs.edit().putBoolean("connect_enabled", false).apply()
         autoReconnect = false
         cancelRetry()
         session++
