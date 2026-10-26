@@ -511,6 +511,32 @@ fun MomoApp(
                 }
 
                 DarkCard {
+                    SectionTitle("Momo face for the watch")
+                    Hint("Step 1: Save the original 320 x 390 Momo photo face. " +
+                        "Step 2: Open MActivePro, connect Watch 7, then choose the Custom/Album " +
+                        "watch face and import the saved image. UI names may vary by watch.")
+                    Button(onClick = {
+                        faceStatus = if (MomoFaceExport.saveToGallery(context))
+                            "Saved to Pictures/Momo. Now use MActivePro > Watch faces > Custom/Album."
+                        else "Couldn't save the PNG. Check storage and try again."
+                    }, modifier = Modifier.fillMaxWidth()) { Text("1. Save Momo face for Watch 7") }
+                    OutlinedButton(onClick = {
+                        runCatching {
+                            val appIntent = context.packageManager
+                                .getLaunchIntentForPackage("com.njj.mactivepro")
+                            context.startActivity(appIntent ?: Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("https://play.google.com/store/apps/details?id=com.njj.mactivepro")
+                            ))
+                        }.onFailure {
+                            faceStatus = "Open MActivePro manually, then look for Custom watch faces."
+                        }
+                    }, modifier = Modifier.fillMaxWidth()) { Text("2. Open MActivePro watch-face app") }
+                    Hint("This makes a real STATIC face visible on supported W17 watches. " +
+                        "Live expressions and standalone AI require unverified firmware capabilities.")
+                    if (faceStatus.isNotBlank()) Hint(faceStatus)
+                }
+                DarkCard {
                     SectionTitle("BLE Watch Lab")
                     Hint("Read-only protocol audit: reads standard manufacturer / firmware details " +
                         "and characteristic capabilities. It never sends vendor commands or updates firmware.")
@@ -567,18 +593,6 @@ fun MomoApp(
                     }
                 }
 
-                DarkCard {
-                    SectionTitle("Momo face for the watch")
-                    Hint("This exports an original static Momo face to your phone's Pictures/Momo " +
-                        "gallery folder. If your watch's official app supports custom photo dials, " +
-                        "you can choose it there. Live animated watch-face control isn't verified.")
-                    OutlinedButton(onClick = {
-                        faceStatus = if (MomoFaceExport.saveToGallery(context))
-                            "Saved to Pictures/Momo. Use your watch's official custom dial tool."
-                        else "Couldn't save the image. Try again."
-                    }, modifier = Modifier.fillMaxWidth()) { Text("Save Momo face image") }
-                    if (faceStatus.isNotBlank()) Hint(faceStatus)
-                }
             }
 
             if (tab == 2) {
