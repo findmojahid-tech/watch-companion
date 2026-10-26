@@ -25,6 +25,13 @@ android {
         jvmTarget = "17"
     }
 
+    buildTypes {
+        getByName("debug") {
+            // Diagnostic APK installs beside V3 instead of replacing its tasks/key.
+            applicationIdSuffix = ".watchlab"
+        }
+    }
+
     buildFeatures { compose = true }
 
     packaging {
