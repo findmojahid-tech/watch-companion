@@ -82,6 +82,8 @@ class DirectWatchClient(private val context: Context) {
     private var probeDescriptorUuid: UUID? = null
     private var probeTimer: Runnable? = null
     private var probeRunning = false
+    private var probeIdSent = false
+    private var probePendingWriteUuid: UUID? = null
 
     private fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
@@ -213,6 +215,8 @@ class DirectWatchClient(private val context: Context) {
         }
 
         probeRunning = true
+        probeIdSent = false
+        probePendingWriteUuid = null
         probeReadUuid = null
         probeDescriptorUuid = null
         captureMutable.value = WatchProtocolCapture(
@@ -287,6 +291,67 @@ class DirectWatchClient(private val context: Context) {
         )
     }
 
+    /**
+     * ONE explicit watch-only experiment per capture. The fixed six-byte
+     * request is an NJJ product-ID QUERY from a DIFFERENT watch family, so a
+     * reply is NOT guaranteed. Never send it to the Goodix service. This is
+     * not a dial uploader and never touches the Android phone firmware.
+     */
+    @SuppressLint("MissingPermission")
+    @Suppress("DEPRECATION")
+    fun sendExperimentalProductId(endpoint: String) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post { sendExperimentalProductId(endpoint) }
+            return
+        }
+        if (!probeRunning || !connected || probeIdSent) {
+            addProbeEvent("ID query not sent: start a new 30s capture first.")
+            return
+        }
+        if (standardReadPending || probeReadUuid != null ||
+            probeDescriptorUuid != null || probeNotifications.isNotEmpty() ||
+            probeReads.isNotEmpty()) {
+            addProbeEvent("ID query not sent: wait for vendor notification setup.")
+            return
+        }
+        val uuid = when (endpoint) {
+            "0b" -> "6e40000b-b5a3-f393-e0a9-e50e24dcca9e"
+            "0c" -> "6e40000c-b5a3-f393-e0a9-e50e24dcca9e"
+            else -> {
+                addProbeEvent("ID query blocked: endpoint is not 0b or 0c.")
+                return
+            }
+        }
+        val connection = gatt ?: return
+        val service = connection.getService(UUID.fromString(Watch7PassiveProbe.VENDOR_SERVICE))
+        val characteristic = service?.getCharacteristic(UUID.fromString(uuid))
+        if (characteristic == null || !Watch7PassiveProbe.canProbe(
+                Watch7PassiveProbe.VENDOR_SERVICE, uuid, characteristic.properties)) {
+            addProbeEvent("ID query blocked: write-with-response endpoint not found.")
+            return
+        }
+        probeIdSent = true // no retry, even after a failed attempt
+        probePendingWriteUuid = characteristic.uuid
+        val packet = Watch7PassiveProbe.speculativeProductIdQuery
+        addProbeEvent("TX ID QUERY on " + uuid.substring(0, 8) + ": " +
+            Watch7PassiveProbe.briefHex(packet))
+        val accepted = runCatching {
+            if (Build.VERSION.SDK_INT >= 33) {
+                connection.writeCharacteristic(
+                    characteristic, packet, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                ) == BluetoothStatusCodes.SUCCESS
+            } else {
+                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                characteristic.value = packet
+                connection.writeCharacteristic(characteristic)
+            }
+        }.getOrDefault(false)
+        if (!accepted) {
+            probePendingWriteUuid = null
+            addProbeEvent("ID query was rejected by Android Bluetooth (no retry).")
+        }
+    }
+
     fun stopPassiveCapture() {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             handler.post { stopPassiveCapture() }
@@ -341,6 +406,8 @@ class DirectWatchClient(private val context: Context) {
         probeNotifications.clear()
         probeReadUuid = null
         probeDescriptorUuid = null
+        probePendingWriteUuid = null
+        probeIdSent = false
         standardReadPending = false
         readQueue.clear()
         connected = false
@@ -495,6 +562,23 @@ class DirectWatchClient(private val context: Context) {
                 status: Int
             ) {
                 readDone(current, characteristic, value, status)
+            }
+
+            override fun onCharacteristicWrite(
+                connection: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                status: Int
+            ) {
+                handler.post {
+                    if (current != session || connection !== gatt || !probeRunning ||
+                        probePendingWriteUuid != characteristic.uuid) return@post
+                    probePendingWriteUuid = null
+                    addProbeEvent(
+                        if (status == BluetoothGatt.GATT_SUCCESS)
+                            "ID query GATT accepted; watch reply still unverified."
+                        else "ID query GATT failed: " + status + " (no retry)."
+                    )
+                }
             }
 
             override fun onDescriptorWrite(
