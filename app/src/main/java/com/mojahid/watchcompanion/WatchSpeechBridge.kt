@@ -113,18 +113,18 @@ class WatchSpeechBridge(
         language: String,
         onStatus: (String) -> Unit,
         onResult: (WatchSpeechResult) -> Unit,
-        onError: (String) -> Unit
+        onFailure: (String) -> Unit
     ) {
         if (!isMainThread()) {
-            onError("Please start the microphone test from the app screen.")
+            onFailure("Please start the microphone test from the app screen.")
             return
         }
         if (current != null) {
-            onError("A watch speech test is already running.")
+            onFailure("A watch speech test is already running.")
             return
         }
         if (Build.VERSION.SDK_INT < 33) {
-            onError("This direct speech-audio test requires Android 13 or newer.")
+            onFailure("This direct speech-audio test requires Android 13 or newer.")
             return
         }
         if (ContextCompat.checkSelfPermission(
@@ -132,17 +132,17 @@ class WatchSpeechBridge(
             ContextCompat.checkSelfPermission(
                 context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
         ) {
-            onError("Allow Microphone and Nearby devices permissions.")
+            onFailure("Allow Microphone and Nearby devices permissions.")
             return
         }
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onError("Android speech recognition isn't available on this phone.")
+            onFailure("Android speech recognition isn't available on this phone.")
             return
         }
 
         val output = manager.communicationDevice
         if (output == null || !isBluetoothMicrophone(output.type)) {
-            onError("First select Watch call under Watch microphone & speaker.")
+            onFailure("First select Watch call under Watch microphone & speaker.")
             return
         }
         val bluetoothInputs = manager.getDevices(AudioManager.GET_DEVICES_INPUTS)
@@ -153,7 +153,7 @@ class WatchSpeechBridge(
             ) == true
         } ?: bluetoothInputs.singleOrNull()
         if (input == null) {
-            onError(
+            onFailure(
                 if (bluetoothInputs.size > 1) {
                     "Several Bluetooth microphones are present. Disconnect other headsets and retry."
                 } else {
@@ -192,7 +192,7 @@ class WatchSpeechBridge(
         }
 
         val mic = record ?: run {
-            onError("Couldn't initialize the Bluetooth microphone recorder.")
+            onFailure("Couldn't initialize the Bluetooth microphone recorder.")
             return
         }
 
@@ -203,7 +203,7 @@ class WatchSpeechBridge(
         val pipe = runCatching { ParcelFileDescriptor.createPipe() }.getOrNull()
         if (pipe == null) {
             mic.release()
-            onError("Couldn't open the internal speech-audio pipe.")
+            onFailure("Couldn't open the internal speech-audio pipe.")
             return
         }
 
@@ -214,7 +214,7 @@ class WatchSpeechBridge(
             runCatching { pipe[0].close() }
             runCatching { pipe[1].close() }
             mic.release()
-            onError("Couldn't start the Android speech recognition service.")
+            onFailure("Couldn't start the Android speech recognition service.")
             return
         }
 
@@ -249,7 +249,7 @@ class WatchSpeechBridge(
                 val watchMic = s.capturedFromWatch
                 finish(s)
                 if (hypotheses.isEmpty()) {
-                    onError("No English words recognized. Try speaking nearer the watch.")
+                    onFailure("No English words recognized. Try speaking nearer the watch.")
                 } else {
                     onResult(WatchSpeechResult(hypotheses, route, watchMic))
                 }
@@ -258,7 +258,7 @@ class WatchSpeechBridge(
                 if (current !== s || s.ended.get()) return
                 val route = s.captureRoute
                 finish(s)
-                onError(messageFor(error) + " Captured mic route: " + route)
+                onFailure(messageFor(error) + " Captured mic route: " + route)
             }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
@@ -290,7 +290,7 @@ class WatchSpeechBridge(
             true
         }.getOrElse { failure ->
             finish(s)
-            onError("Unable to start watch English recognition: " +
+            onFailure("Unable to start watch English recognition: " +
                 (failure.message ?: "check microphone permission."))
             false
         }
@@ -321,7 +321,7 @@ class WatchSpeechBridge(
                                 handler.post {
                                     if (current === s && !s.ended.get()) {
                                         finish(s)
-                                        onError("Input routed to " + s.captureRoute +
+                                        onFailure("Input routed to " + s.captureRoute +
                                             ", not Watch call. No question was sent to AI.")
                                     }
                                 }
@@ -350,7 +350,7 @@ class WatchSpeechBridge(
         val timeout = Runnable {
             if (current === s && !s.ended.get()) {
                 finish(s)
-                onError(
+                onFailure(
                     "Speech service didn't finish within 18 seconds. " +
                         "It may not support external audio input; try again."
                 )
