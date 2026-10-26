@@ -784,6 +784,11 @@ fun MomoHome(
                 MomoNote("Discovered " + watch.vendorServices.size +
                     " vendor BLE services, " + watch.vendorCharacteristics.size +
                     " proprietary characteristics.")
+                val profile = Watch7GattProfile.assess(
+                    watch.firmware, watch.hardware, watch.vendorServices,
+                    watch.vendorCharacteristics
+                )
+                MomoNote(profile.explanation)
                 OutlinedButton(onClick = {
                     val report = buildString {
                         append("Watch: ").append(watch.deviceName)
@@ -793,6 +798,10 @@ fun MomoHome(
                         append(watch.vendorServices.joinToString("\n"))
                         append("\nCharacteristic properties:\n")
                         append(watch.vendorCharacteristics.joinToString("\n"))
+                        append("\nWatch 7 firmware 4.21 profile match: ")
+                            .append(profile.exactFirmware421Profile)
+                        append("\nVerified watch-face transfer: ")
+                            .append(profile.dialTransferVerified)
                         append("\nNotes: Read-only. No dial upload attempted.")
                     }
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
