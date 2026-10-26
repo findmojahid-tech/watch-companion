@@ -11,6 +11,7 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -48,17 +49,53 @@ class BleDiagnostics(private val context: Context) {
     fun scan(onUpdate: (List<BleDeviceRow>) -> Unit, onStatus: (String) -> Unit) {
         if (!allowed(Manifest.permission.BLUETOOTH_SCAN) ||
             !allowed(Manifest.permission.BLUETOOTH_CONNECT)) {
-            onStatus("Allow Nearby devices, then scan again.")
+            onStatus("Allow Nearby devices in Android Settings and try again.")
             return
         }
         stopScan()
         closeGatt()
+
+        val found = linkedMapOf<String, BleDeviceRow>()
+        fun showRows() {
+            onUpdate(found.values.sortedWith(
+                compareByDescending<BleDeviceRow> {
+                    it.name.contains("watch", true) || it.name.contains("w17", true)
+                }.thenBy { it.name }
+            ))
+        }
+
+        // A bonded / already-connected device may STOP advertising. Show paired devices
+        // even when Android scan callbacks are empty (seen on Watch 7 on Pixel 7).
+        val paired = runCatching { adapter?.bondedDevices.orEmpty() }.getOrDefault(emptySet())
+        paired.forEach { device ->
+            val name = runCatching { device.name }.getOrNull().orEmpty()
+            val isWatch = name.contains("watch", true) || name.contains("w17", true) ||
+                name.contains("mactive", true)
+            val potentiallyBle = device.type == BluetoothDevice.DEVICE_TYPE_LE ||
+                device.type == BluetoothDevice.DEVICE_TYPE_DUAL
+            if (isWatch || potentiallyBle) {
+                found[device.address] = BleDeviceRow(
+                    if (name.isBlank()) "Paired BLE device" else name + " [paired]",
+                    device.address
+                )
+            }
+        }
+        val prefs = context.getSharedPreferences("momo_ble_history", Context.MODE_PRIVATE)
+        val oldAddress = prefs.getString("last_watch_address", null)
+        val oldName = prefs.getString("last_watch_name", "Watch 7") ?: "Watch 7"
+        if (!oldAddress.isNullOrBlank() && !found.containsKey(oldAddress)) {
+            found[oldAddress] = BleDeviceRow(oldName + " [last seen]", oldAddress)
+        }
+        showRows()
+
         val scanner = adapter?.bluetoothLeScanner ?: run {
-            onStatus("Bluetooth LE isn't available or is turned off.")
+            onStatus(
+                if (found.isEmpty()) "Bluetooth LE is unavailable. Enable Bluetooth."
+                else "Showing paired/previous devices. BLE advertising is not available."
+            )
             return
         }
 
-        val found = linkedMapOf<String, BleDeviceRow>()
         val cb = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val row = BleDeviceRow(
@@ -68,36 +105,49 @@ class BleDiagnostics(private val context: Context) {
                 )
                 handler.post {
                     found[row.address] = row
-                    onUpdate(found.values.sortedWith(
-                        compareByDescending<BleDeviceRow> {
-                            it.name.contains("watch", true) || it.name.contains("w17", true)
-                        }.thenBy { it.name }
-                    ))
+                    if (row.name.contains("watch", true) || row.name.contains("w17", true)) {
+                        prefs.edit().putString("last_watch_name", row.name)
+                            .putString("last_watch_address", row.address).apply()
+                    }
+                    showRows()
                 }
             }
 
             override fun onScanFailed(errorCode: Int) {
-                handler.post { onStatus("Bluetooth scan error " + errorCode + ". Try again.") }
+                handler.post {
+                    onStatus("BLE scan error " + errorCode +
+                        ". Paired devices may still be listed; try Watch 7.")
+                }
             }
         }
 
         scanCallback = cb
-        runCatching { scanner.startScan(cb) }.onFailure {
-            onStatus("Unable to start BLE scan. Check Bluetooth permission.")
+        val scanSettings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+        runCatching { scanner.startScan(null, scanSettings, cb) }.onFailure {
+            onStatus("BLE scan couldn't start. Try a paired device below.")
             stopScan()
             return
         }
 
-        onStatus("Scanning nearby BLE devices for 12 seconds...")
+        onStatus(
+            if (found.isEmpty()) "Scanning for Watch 7 (15 seconds). Keep its screen awake."
+            else "Showing paired watches and scanning for Watch 7 (15 seconds)."
+        )
         val stopper = Runnable {
             stopScan()
             onStatus(
-                if (found.isEmpty()) "No BLE devices found. Try with the watch screen awake."
-                else "Scan finished. Tap your watch for a read-only protocol audit."
+                if (found.isEmpty()) {
+                    "No BLE advertisements found. Watch 7 may already be connected to " +
+                        "MActivePro. Keep the watch awake, or temporarily close its companion app."
+                } else {
+                    "Scan finished. Choose Watch 7 or its paired entry to inspect safely."
+                }
             )
         }
         stopScanRunnable = stopper
-        handler.postDelayed(stopper, 12000)
+        handler.postDelayed(stopper, 15000)
     }
 
     @SuppressLint("MissingPermission")
