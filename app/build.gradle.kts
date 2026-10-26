@@ -6,6 +6,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseKeystore = System.getenv("MOMO_SIGNING_KEYSTORE")
+val releaseStorePassword = System.getenv("MOMO_SIGNING_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("MOMO_SIGNING_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("MOMO_SIGNING_KEY_PASSWORD")
+val signingConfigured = listOf(
+    releaseKeystore, releaseStorePassword, releaseKeyAlias, releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.mojahid.watchcompanion"
     compileSdk = 35
@@ -23,10 +31,27 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        create("momoProduction") {
+            if (signingConfigured) {
+                storeFile = file(requireNotNull(releaseKeystore))
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
-            // Diagnostic APK installs beside V3 instead of replacing its tasks/key.
-            applicationIdSuffix = ".momo10"
+            // A development build always installs beside the eventual signed release.
+            applicationIdSuffix = ".dev"
+        }
+        getByName("release") {
+            // Never sign production with a disposable GitHub runner debug certificate.
+            if (signingConfigured) {
+                signingConfig = signingConfigs.getByName("momoProduction")
+            }
         }
     }
 
