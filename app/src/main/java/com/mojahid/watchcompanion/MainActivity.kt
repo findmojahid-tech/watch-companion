@@ -52,10 +52,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private lateinit var audio: AudioManager
     private lateinit var tts: TextToSpeech
     private var recognizer: SpeechRecognizer? = null
+    private var watchSpeech: WatchSpeechBridge? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        watchSpeech = WatchSpeechBridge(this, audio)
         tts = TextToSpeech(this, this)
 
         setContent {
@@ -74,7 +76,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 MomoHome(
                     audio = audio,
                     say = { speak(it) },
-                    recognize = { locale, onText, onError -> startRecognizing(locale, onText, onError) }
+                    recognize = { locale, onText, onError -> startRecognizing(locale, onText, onError) },
+                    recognizeWatch = { locale, onStatus, onText, onError ->
+                        watchSpeech?.start(locale, onStatus, onText, onError)
+                            ?: onError("Watch speech service is unavailable.")
+                    }
                 )
             }
         }
@@ -176,6 +182,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
+        watchSpeech?.cancel()
+        watchSpeech = null
         recognizer?.destroy()
         recognizer = null
         if (::tts.isInitialized) {
