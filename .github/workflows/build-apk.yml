@@ -19,6 +19,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prevent unreviewed watch firmware writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -nE 'writeCharacteristic[[:space:]]*\\(|writeDescriptor[[:space:]]*\\(' app/src/main/java; then
+            echo "Unreviewed BLE write API detected. Stop: firmware safety gate failed."
+            exit 1
+          fi
+
       - name: Verify low-RAM Momo watch-face renderer
         shell: bash
         run: |
