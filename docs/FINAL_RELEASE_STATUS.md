@@ -91,3 +91,38 @@ Those UUIDs **do not identify the watch-face transfer format**.
 No new APK links, no new per-version installer packages. No secrets sent in
 chat. No third-party vendor app as a runtime dependency. Do not claim this is
 phone-independent or that live face animation works before demonstrating it.
+
+## Owner-authorized watch-side experiment mode (2026-10-27)
+
+The owner explicitly permitted experiments that might disrupt/damage the **watch**
+but prohibited changes to the **Pixel 7 phone**. This modifies the previous
+blanket "no experimental vendor writes" preference only for a narrow,
+explicit, on-demand watch identification probe. It does NOT waive the
+requirement to verify and approve a final production release.
+
+Implemented on `integration/momo-final` (not yet physically executed):
+
+1. Existing Momo GATT connection, exact-match 4.21/1.0 fingerprint. No
+   MActivePro needed. No added Android permissions, root, bootloader or OS
+   setting changes.
+2. 30-second passive experiment: five GATT READ operations
+   (`6e400005`–`009`), eight temporary NOTIFY subscriptions
+   (`005`–`009`, `00b`–`00d`) with standard CCCD 0x2902 writes.
+   Bounded in-memory evidence, explicit copy only. Link is closed and
+   automatically reconnected afterwards.
+3. Optional explicit checkbox unlocks one speculative NJJ product-ID query
+   (`BC 3C 01 01 00 00`) on **one** of `6e40000b` or `6e40000c`,
+   one attempt per capture. Older Microwear/NJJ packet is **NOT validated**
+   for this W17; no retransmission/OTA/dial file is attempted.
+4. Every characteristic and endpoint is code-allowlisted; Goodix
+   `a6ed0401` is never targeted by this experimental mode. GitHub CI
+   guards the limited GATT write locations, and tests cover the fixed
+   UUID/packet allowlist.
+
+**Evidence still required:** actual captured bytes from this exact physical
+watch, any responses to the identification query, a verified and reversible
+photo-dial transfer, live animation support, background voice, end-to-end
+speech/AI, stable signing and physical acceptance. This implementation does
+**not** meet the final watch-face acceptance gate by itself.
+
+No new owner-facing APK has been published and PR #12 remains unmerged.
