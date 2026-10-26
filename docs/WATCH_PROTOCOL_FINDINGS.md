@@ -97,3 +97,47 @@ https://apptopia.com/ios/app/1587451906/about
 
 **Result:** Watch-face upload remains blocked; no user-visible test APK,
 BLE writes, or firmware changes are justified by these findings.
+
+## Exact verified GATT properties: owner's Watch 7 firmware 4.21 / hardware 1.0
+
+The owner copied this **read-only** report from the physical Pixel 7 and W17 Pro.
+It excludes the BLE MAC address, media, personal data and any write payload.
+This is a device fingerprint, **not** a decoded command protocol.
+
+| Service | Characteristic suffix | Observed GATT property | Safe interpretation |
+|---|---|---|---|
+| `a6ed0401-d344-460a-8075-b9e8ec90d71b` | `a6ed0402` | NOTIFY | Goodix-style DFU response candidate; not a dial API |
+| `a6ed0401-…` | `a6ed0403`, `a6ed0404` | WRITE_NO_RESPONSE | Flash/DFU family; **never write without a validated recovery process** |
+| `6e400004-b5a3-f393-e0a9-e50e24dcca9e` | `6e400005`–`6e400009` | READ, NOTIFY | Five read-capable unknown vendor characteristics; content not yet decoded |
+| `6e40000a-b5a3-f393-e0a9-e50e24dcca9e` | `6e40000b`, `6e40000c` | WRITE, WRITE_NO_RESPONSE, NOTIFY | Two **unverified** bidirectional vendor endpoints; purpose, framing and authorization unknown |
+| `6e40000a-…` | `6e40000d` | NOTIFY | Notification-only unknown vendor endpoint; not a proven transfer ACK |
+
+**Crucial:** `6e40000a` is a *service*, not itself an observed
+`WRITE` characteristic. Its `0b`/`0c` children permit writes, but
+neither a write property nor a notification property proves watch-face
+transfer. The `6e400004` service's `005`–`009` characteristics are
+READ/NOTIFY, **not** upload targets. The `a6ed0401` family is associated
+with Goodix firmware updates and must not be used to trial dial files.
+
+The real 4.21 topology is now an exact-match, fail-closed test fixture in
+`Watch7GattProfile.kt` and `Watch7GattProfileTest.kt`. The app displays
+a clear compatibility verdict based on live discovery; it still has **no**
+watch-face transmitter. Matching the signature is not evidence that a dial
+upload will work.
+
+### What would unblock original static face transfer
+
+Obtain at least one of: a manufacturer-approved **W17 Pro hardware 1.0,
+firmware 4.21** photo-dial SDK, or a captured and device-matched authorized
+dial upload trace. Then verify the characteristic, dial resource encoding,
+screen dimensions, start/data/end framing, ACK and retransmission behavior,
+image limits, recovery path and reversibility **without writing anything
+to the Goodix DFU channel**. A separate, credible firmware capability check
+is needed for animated eyes; a still-image dial never proves animation.
+
+Microwear advertises optional SDK integration for eligible OEM projects:
+https://www.microwear.info/oem-services
+Do not assume that advertised SDK coverage includes this older W17 Pro
+revision. An unrelated MActivePro/NJJ watch report uses FF02/FF03 under
+`000001ff`, which **does not match these actual Watch 7 services**:
+https://github.com/pedrohsipriano/hub-saude
