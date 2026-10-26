@@ -98,7 +98,13 @@ fun MomoHome(
     var showTasks by remember { mutableStateOf(false) }
     var tasks by remember { mutableStateOf(taskEngine.tasks()) }
     var aiKey by remember { mutableStateOf("") }
-    var cloudInfo by remember { mutableStateOf("Optional: stronger cloud AI, requires a key.") }
+    var cloudInfo by remember {
+        mutableStateOf(if (keys.read().isNullOrBlank())
+            "No cloud AI connected. Paste a key once to activate fast English answers."
+        else "A Gemini key is saved. Use Test saved key to confirm it.")
+    }
+    var cloudConfigured by remember { mutableStateOf(!keys.read().isNullOrBlank()) }
+    var chatHistory by remember { mutableStateOf<List<ChatTurn>>(emptyList()) }
     var validatingKey by remember { mutableStateOf(false) }
     var bleList by remember { mutableStateOf<List<BleDeviceRow>>(emptyList()) }
     var bleInfo by remember { mutableStateOf("No watch inspection yet.") }
@@ -156,15 +162,26 @@ fun MomoHome(
                 if (local != null) {
                     tasks = local.tasks
                     local.message
-                } else if (offlineStore.verified()) {
-                    OfflineMomo.answer(context, text)
                 } else {
                     val key = keys.read()
                     if (!key.isNullOrBlank()) {
-                        GeminiClient.chat(text, emptyList(), key)
+                        try {
+                            val result = GeminiClient.chat(text, chatHistory, key)
+                            chatHistory = (chatHistory + ChatTurn("user", text) +
+                                ChatTurn("model", result)).takeLast(8)
+                            result
+                        } catch (cloudError: Exception) {
+                            if (offlineStore.verified()) {
+                                OfflineMomo.answer(context, text)
+                            } else {
+                                "Gemini connection issue: " +
+                                    (cloudError.message ?: "Try the AI key test below.")
+                            }
+                        }
+                    } else if (offlineStore.verified()) {
+                        OfflineMomo.answer(context, text)
                     } else {
-                        "To answer questions without an API key, tap Download offline AI " +
-                            "in this app. It's a one-time 347 MB download."
+                        "Connect Gemini under AI Brain below, or download the offline AI."
                     }
                 }
             } catch (error: Exception) {
@@ -271,8 +288,9 @@ fun MomoHome(
                     color = MomoBlue, style = MaterialTheme.typography.titleSmall
                 )
                 MomoNote(
-                    if (model.ready) "Free offline brain ready · no API key"
-                    else "Offline brain not installed"
+                    if (cloudConfigured) "Gemini AI key saved · cloud answers first"
+                    else if (model.ready) "Free offline AI ready"
+                    else "AI not connected — setup below"
                 )
             }
         }
