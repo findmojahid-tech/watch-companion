@@ -17,7 +17,7 @@ import java.util.Locale
 /**
  * 320 x 390 original Momo face optimized for the widely listed W17 Pro dial resolution.
  * This exports a normal PNG, not a proprietary watch firmware file.
- * MActivePro (com.njj.mactivepro) can import photo/album dials on supported models.
+ * File export is local only; V7 intentionally has no unsupported watch-face upload action.
  */
 object MomoFaceExport {
     fun saveToGallery(context: Context): Boolean = runCatching {
