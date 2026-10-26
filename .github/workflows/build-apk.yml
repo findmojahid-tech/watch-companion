@@ -24,14 +24,14 @@ jobs:
         run: |
           set -euo pipefail
           # Never allow vendor characteristic writes, including OTA/DFU uploads.
-          if grep -R -nE 'writeCharacteristic[[:space:]]*\\(' app/src/main/java; then
+          if grep -R -nE 'writeCharacteristic[[:space:]]*\(' app/src/main/java; then
             echo "Proprietary BLE characteristic writer detected. Stop."
             exit 1
           fi
           # The only allowed descriptor writes are Android notification CCCD
           # subscriptions in DirectWatchClient, which runtime-checks the
           # actual Watch 7 4.21 GATT signature and a fixed allowlist.
-          unsafe=$(grep -R -nE 'writeDescriptor[[:space:]]*\\(' app/src/main/java \\
+          unsafe=$(grep -R -nE 'writeDescriptor[[:space:]]*\(' app/src/main/java \\
             | grep -v 'DirectWatchClient.kt:' || true)
           if [ -n "$unsafe" ]; then
             echo "$unsafe"
@@ -39,7 +39,7 @@ jobs:
             exit 1
           fi
           file=app/src/main/java/com/mojahid/watchcompanion/DirectWatchClient.kt
-          count=$(grep -cE 'writeDescriptor[[:space:]]*\\(' "$file" || true)
+          count=$(grep -cE 'writeDescriptor[[:space:]]*\(' "$file" || true)
           if [ "$count" -ne 2 ]; then
             echo "Unexpected number of CCCD write sites: $count"
             exit 1
