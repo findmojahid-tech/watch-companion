@@ -20,7 +20,7 @@
     <application
         android:allowBackup="true"
         android:usesCleartextTraffic="false"
-        android:label="Momo W17 AI V5"
+        android:label="Momo V6"
         android:theme="@style/Theme.WatchCompanion">
         <activity
             android:name=".MainActivity"
