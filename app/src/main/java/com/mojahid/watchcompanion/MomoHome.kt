@@ -94,7 +94,6 @@ fun MomoHome(
         mutableStateOf("Speaker confirmed by user. Microphone source still needs testing.")
     }
     var showAdvanced by remember { mutableStateOf(false) }
-    var showCloud by remember { mutableStateOf(false) }
     var showTasks by remember { mutableStateOf(false) }
     var tasks by remember { mutableStateOf(taskEngine.tasks()) }
     var aiKey by remember { mutableStateOf("") }
@@ -352,6 +351,128 @@ fun MomoHome(
                 MomoNote("A visible microphone notification stays on. Android may suspend " +
                     "continuous recognition after locking the phone; this is experimental.")
             }
+        }
+
+        MomoPanel {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("AI Brain", color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f))
+                Text(
+                    if (cloudConfigured) "KEY SAVED" else "SETUP",
+                    color = MomoBlue,
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+
+            MomoNote("Cloud Gemini answers first when your personal key is saved. " +
+                "You can also use the free offline model without a key.")
+            if (!cloudConfigured || aiKey.isNotBlank()) {
+                OutlinedTextField(
+                    value = aiKey,
+                    onValueChange = { aiKey = it.trim().take(250) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    label = { Text("Gemini key — paste once") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                                as ClipboardManager
+                            val clip = clipboard.primaryClip
+                            val copied = clip?.getItemAt(0)?.coerceToText(context)
+                                ?.toString()?.trim().orEmpty()
+                            if (copied.isBlank() || copied.length > 250) {
+                                cloudInfo = "Copy your API key first, then tap Paste key."
+                            } else {
+                                aiKey = copied
+                                cloudInfo = "Key pasted privately. Tap Connect Gemini " +
+                                    "to verify it against Google."
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Paste key") }
+                    Button(
+                        enabled = aiKey.isNotBlank() && !validatingKey,
+                        onClick = {
+                            validatingKey = true
+                            cloudInfo = "Connecting to Gemini and testing an English answer..."
+                            val candidate = aiKey.trim()
+                            scope.launch {
+                                try {
+                                    val tested = GeminiClient.verifyKey(candidate)
+                                    if (keys.save(candidate)) {
+                                        cloudConfigured = true
+                                        aiKey = ""
+                                        cloudInfo = "Gemini connected: " + tested.model +
+                                            ". You can now ask questions in English."
+                                    } else {
+                                        cloudInfo = "Google accepted the key, but the " +
+                                            "phone could not save it."
+                                    }
+                                } catch (error: Exception) {
+                                    cloudInfo = "Connection failed: " +
+                                        (error.message ?: "Check network, key and quota.")
+                                } finally {
+                                    validatingKey = false
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (validatingKey) "Connecting..." else "Connect Gemini")
+                    }
+                }
+            }
+
+            if (cloudConfigured) {
+                OutlinedButton(
+                    onClick = {
+                        val stored = keys.read()
+                        if (stored.isNullOrBlank()) {
+                            cloudInfo = "Saved key couldn't be unlocked. Reconnect Gemini."
+                            cloudConfigured = false
+                        } else {
+                            validatingKey = true
+                            cloudInfo = "Testing saved key..."
+                            scope.launch {
+                                try {
+                                    val tested = GeminiClient.verifyKey(stored)
+                                    cloudInfo = "Live AI OK: " + tested.model +
+                                        ". " + tested.testReply
+                                } catch (error: Exception) {
+                                    cloudInfo = "Saved-key test failed: " +
+                                        (error.message ?: "Please reconnect Gemini.")
+                                } finally {
+                                    validatingKey = false
+                                }
+                            }
+                        }
+                    },
+                    enabled = !validatingKey,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (validatingKey) "Testing..." else "Test saved Gemini key") }
+                TextButton(onClick = {
+                    keys.clear()
+                    aiKey = ""
+                    cloudConfigured = false
+                    chatHistory = emptyList()
+                    cloudInfo = "Gemini key removed from this phone."
+                }, modifier = Modifier.fillMaxWidth()) { Text("Remove saved key") }
+            }
+
+            MomoNote(cloudInfo)
+            OutlinedButton(onClick = {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))
+                )
+            }, modifier = Modifier.fillMaxWidth()) { Text("Open Google AI Studio") }
+            MomoNote("Never send your API key in a chat or put it in GitHub. " +
+                "This personal prototype encrypts the key on your phone. " +
+                "Google's free quota and internet availability still apply.")
         }
 
         MomoPanel {
@@ -715,45 +836,6 @@ fun MomoHome(
                         clipboard.setPrimaryClip(ClipData.newPlainText("Momo GATT report", report))
                         bleInfo = "Copied watch report. Paste it in ChatGPT."
                     }, modifier = Modifier.fillMaxWidth()) { Text("Copy BLE report") }
-                }
-
-                OutlinedButton(onClick = { showCloud = !showCloud },
-                    modifier = Modifier.fillMaxWidth()) {
-                    Text(if (showCloud) "Hide optional cloud AI" else "Optional: stronger cloud AI")
-                }
-                if (showCloud) {
-                    MomoNote("Gemini cloud uses your own API key and internet. " +
-                        "Offline AI is the default if it is installed.")
-                    OutlinedTextField(
-                        value = aiKey,
-                        onValueChange = { aiKey = it.take(250) },
-                        label = { Text("Gemini API key (optional)") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Button(onClick = {
-                        validatingKey = true
-                        scope.launch {
-                            cloudInfo = try {
-                                val check = GeminiClient.verifyKey(aiKey.trim())
-                                if (keys.save(aiKey.trim())) {
-                                    aiKey = ""
-                                    "Connected to " + check.model
-                                } else "Google accepted the key but the phone could not save it."
-                            } catch (e: Exception) {
-                                e.message ?: "Cloud AI setup failed."
-                            }
-                            validatingKey = false
-                        }
-                    }, enabled = !validatingKey && aiKey.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth()) {
-                        Text(if (validatingKey) "Verifying..." else "Verify and save cloud key")
-                    }
-                    OutlinedButton(onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW,
-                            Uri.parse("https://aistudio.google.com/apikey")))
-                    }, modifier = Modifier.fillMaxWidth()) { Text("Get Gemini API key") }
-                    MomoNote(cloudInfo)
                 }
 
                 OutlinedButton(onClick = {
