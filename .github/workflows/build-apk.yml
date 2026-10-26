@@ -31,7 +31,7 @@ jobs:
           # The only allowed descriptor writes are Android notification CCCD
           # subscriptions in DirectWatchClient, which runtime-checks the
           # actual Watch 7 4.21 GATT signature and a fixed allowlist.
-          unsafe=$(grep -R -nE 'writeDescriptor[[:space:]]*\(' app/src/main/java \\
+          unsafe=$(grep -R -nE 'writeDescriptor[[:space:]]*\(' app/src/main/java \
             | grep -v 'DirectWatchClient.kt:' || true)
           if [ -n "$unsafe" ]; then
             echo "$unsafe"
