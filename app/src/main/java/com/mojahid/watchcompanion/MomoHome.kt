@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
+import android.provider.Settings
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -67,6 +68,8 @@ fun MomoHome(
     val keys = remember { AiKeyStore(context) }
     val offlineStore = remember { OfflineModelStore(context) }
     val diagnostics = remember { BleDiagnostics(context) }
+    val directWatch = remember { DirectWatchClient(context) }
+    val watch by directWatch.state.collectAsState()
     val scope = rememberCoroutineScope()
 
     var model by remember { mutableStateOf(ModelDownloadStatus("Checking offline AI...")) }
@@ -92,6 +95,8 @@ fun MomoHome(
     var bleInfo by remember { mutableStateOf("No watch inspection yet.") }
     var bleResult by remember { mutableStateOf<BleInspection?>(null) }
     var dialInfo by remember { mutableStateOf("") }
+    var pairedWatches by remember { mutableStateOf<List<BleDeviceRow>>(emptyList()) }
+    var scanningWatches by remember { mutableStateOf(false) }
 
     val requestPermissions = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -99,6 +104,7 @@ fun MomoHome(
         if (result[Manifest.permission.RECORD_AUDIO] == false) {
             status = "Microphone permission is required to listen for Momo."
         }
+        pairedWatches = directWatch.pairedWatches()
     }
 
     fun audioRefresh() {
@@ -198,6 +204,7 @@ fun MomoHome(
         }
         requestPermissions.launch(permissions.toTypedArray())
         audioRefresh()
+        pairedWatches = directWatch.pairedWatches()
     }
 
     // Refresh model download and show last recognized wake conversation without requiring
@@ -220,7 +227,12 @@ fun MomoHome(
         }
     }
 
-    DisposableEffect(Unit) { onDispose { diagnostics.close() } }
+    DisposableEffect(Unit) {
+        onDispose {
+            diagnostics.close()
+            directWatch.close()
+        }
+    }
 
     // SAFE DRAWING PADDING is essential: Android 15/16 enforces edge-to-edge for
     // targetSdk 35, and V5's top TabRow was hidden under the portrait status bar.
@@ -348,8 +360,117 @@ fun MomoHome(
         }
 
         MomoPanel {
-            Text("Your watch", color = Color.White,
-                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Connect your Watch 7", color = Color.White,
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f))
+                Text(
+                    if (watch.isConnected) "CONNECTED" else watch.state.uppercase(),
+                    color = if (watch.isConnected) MomoBlue else MomoSoft,
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+            MomoNote("No vendor app required. Connect Watch 7 directly from Momo.")
+            MomoNote(watch.message)
+            if (watch.isConnected) {
+                if (watch.battery != null) Text(
+                    "Battery: " + watch.battery + "%", color = MomoBlue,
+                    fontWeight = FontWeight.Bold
+                )
+                if (watch.manufacturer.isNotBlank()) MomoNote(
+                    "Manufacturer: " + watch.manufacturer)
+                if (watch.firmware.isNotBlank()) MomoNote(
+                    "Firmware: " + watch.firmware)
+                if (watch.hardware.isNotBlank()) MomoNote(
+                    "Hardware: " + watch.hardware)
+            }
+
+            if (!watch.isConnected) {
+                Button(
+                    onClick = {
+                        pairedWatches = directWatch.pairedWatches()
+                        val candidate = directWatch.knownWatch()
+                            ?: pairedWatches.firstOrNull {
+                                it.name.contains("Watch 7", ignoreCase = true)
+                            }
+                            ?: pairedWatches.firstOrNull()
+                        if (candidate == null) {
+                            scanningWatches = true
+                            bleList = emptyList()
+                            diagnostics.scan(
+                                onUpdate = { rows -> bleList = rows },
+                                onStatus = { bleInfo = it }
+                            )
+                        } else {
+                            scanningWatches = false
+                            diagnostics.stopScan()
+                            directWatch.connect(candidate)
+                        }
+                        audioRefresh()
+                    },
+                    enabled = !watch.isConnecting,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        if (watch.isConnecting) "Connecting..."
+                        else "Connect Watch 7"
+                    )
+                }
+            } else {
+                OutlinedButton(onClick = { directWatch.disconnect() },
+                    modifier = Modifier.fillMaxWidth()) {
+                    Text("Disconnect watch")
+                }
+            }
+
+            if (!watch.isConnected) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            pairedWatches = directWatch.pairedWatches()
+                            bleList = emptyList()
+                            scanningWatches = true
+                            bleInfo = "Finding watches..."
+                            diagnostics.scan(
+                                onUpdate = { rows -> bleList = rows },
+                                onStatus = { bleInfo = it }
+                            )
+                        }, modifier = Modifier.weight(1f)
+                    ) { Text("Find Watch") }
+                    OutlinedButton(
+                        onClick = {
+                            context.startActivity(
+                                Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+                            )
+                        }, modifier = Modifier.weight(1f)
+                    ) { Text("Android Pairing") }
+                }
+                if (scanningWatches) MomoNote(bleInfo)
+                (pairedWatches + bleList)
+                    .distinctBy { it.address }
+                    .filter {
+                        it.name.contains("watch", true) ||
+                            it.name.contains("W17", true) ||
+                            it.name.contains("paired", true)
+                    }
+                    .take(10).forEach { row ->
+                        OutlinedButton(
+                            onClick = {
+                                diagnostics.stopScan()
+                                scanningWatches = false
+                                directWatch.connect(row)
+                                audioRefresh()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Connect " + row.name) }
+                    }
+            }
+
+            HorizontalDivider(color = Color(0xFF344155))
+            Text("Watch microphone & speaker", color = Color.White,
+                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            MomoNote("Select the separate 'Watch call' audio profile below. " +
+                "The watch data link and voice audio are different Bluetooth connections.")
             MomoNote(audioInfo)
             audioChoices.forEach { device ->
                 Button(
@@ -359,48 +480,28 @@ fun MomoHome(
                             val routed = audio.setCommunicationDevice(device)
                             if (routed) {
                                 chosenAudio = device
-                                prefs.edit().putString(
-                                    "preferred_audio_name", device.productName?.toString().orEmpty()
-                                ).apply()
-                                audioInfo = (device.productName?.toString() ?: "Watch") +
-                                    " selected. Test the speaker."
-                            } else audioInfo = "Android couldn't route audio to this watch."
-                        }.onFailure { audioInfo = "Bluetooth audio route unavailable." }
+                                val deviceName = device.productName?.toString().orEmpty()
+                                prefs.edit().putString("preferred_audio_name", deviceName).apply()
+                                audioInfo = deviceName + " selected for Android voice communication."
+                            } else audioInfo = "Android couldn't route communication audio."
+                        }.onFailure { audioInfo = "Audio route not available." }
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    val name = device.productName?.toString() ?: "Bluetooth device"
-                    Text(name + if (chosenAudio?.id == device.id) " ✓" else "")
+                    Text((device.productName?.toString() ?: "Bluetooth call device") +
+                        if (chosenAudio?.id == device.id) " ✓" else "")
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { audioRefresh() }, modifier = Modifier.weight(1f)) {
-                    Text("Refresh")
-                }
                 OutlinedButton(onClick = {
-                    say("Hello! This is Momo speaking through the watch.")
-                }, modifier = Modifier.weight(1f)) {
-                    Text("Test speaker")
-                }
+                    audioRefresh()
+                    pairedWatches = directWatch.pairedWatches()
+                }, modifier = Modifier.weight(1f)) { Text("Refresh audio") }
+                OutlinedButton(onClick = {
+                    say("Hello! I am Momo. Can you hear me through your watch?")
+                }, modifier = Modifier.weight(1f)) { Text("Test speaker") }
             }
-            Button(onClick = {
-                dialInfo = if (MomoFaceExport.saveToGallery(context)) {
-                    "Saved Momo face to Pictures/Momo. Open MActivePro and choose Photo/Album Dial."
-                } else "Couldn't save the photo watchface."
-            }, modifier = Modifier.fillMaxWidth()) { Text("Save Momo face for watch screen") }
-            OutlinedButton(onClick = {
-                runCatching {
-                    val open = context.packageManager
-                        .getLaunchIntentForPackage("com.njj.mactivepro")
-                    context.startActivity(
-                        open ?: Intent(Intent.ACTION_VIEW,
-                            Uri.parse("https://play.google.com/store/apps/details?id=com.njj.mactivepro"))
-                    )
-                }.onFailure { dialInfo = "Open MActivePro manually to install the photo dial." }
-            }, modifier = Modifier.fillMaxWidth()) { Text("Open MActivePro to apply face") }
-            if (dialInfo.isNotBlank()) MomoNote(dialInfo)
-            MomoNote("Photo dials are static. Live animated watch-face control " +
-                "is not yet proven compatible with W17 Pro.")
+            MomoNote("A voice response can use Watch call without keeping BLE diagnostics open.")
         }
 
         MomoPanel {
@@ -457,16 +558,32 @@ fun MomoHome(
                     else "Advanced watch tools & settings")
             }
             if (showAdvanced) {
-                MomoNote("These controls only inspect Bluetooth details. No firmware flash, " +
+                MomoNote("Read-only watch tools. No vendor application, firmware flashing, " +
                     "root, bootloader, unknown Bluetooth writes or phone system changes.")
+                Text("Watch face: direct transfer pending protocol verification",
+                    color = Color.White, fontWeight = FontWeight.SemiBold)
+                MomoNote("Your Watch 7 exposes custom 6E40 services and a Goodix OTA channel. " +
+                    "A safe dial-upload format has NOT been identified. No file will be " +
+                    "sent to the watch until its exact protocol is confirmed.")
+                OutlinedButton(onClick = {
+                    dialInfo = if (MomoFaceExport.saveToGallery(context)) {
+                        "Momo PNG generated locally in Pictures/Momo. " +
+                            "It has not been transferred to the watch."
+                    } else "Could not create the PNG."
+                }, modifier = Modifier.fillMaxWidth()) { Text("Generate Momo face PNG") }
+                if (dialInfo.isNotBlank()) MomoNote(dialInfo)
                 OutlinedButton(onClick = {
                     bleResult = null
                     bleList = emptyList()
                     diagnostics.scan(onUpdate = { bleList = it }, onStatus = { bleInfo = it })
-                }, modifier = Modifier.fillMaxWidth()) { Text("Find paired / nearby watches") }
+                }, enabled = !watch.isConnected,
+                    modifier = Modifier.fillMaxWidth()) { Text("Inspect nearby BLE services") }
+                if (watch.isConnected) {
+                    MomoNote("Disconnect direct Watch 7 link before running the separate diagnostic session.")
+                }
                 MomoNote(bleInfo)
                 bleList.take(12).forEach { row ->
-                    OutlinedButton(onClick = {
+                    OutlinedButton(enabled = !watch.isConnected, onClick = {
                         bleInfo = "Reading services from " + row.name + "..."
                         diagnostics.inspect(
                             row,
