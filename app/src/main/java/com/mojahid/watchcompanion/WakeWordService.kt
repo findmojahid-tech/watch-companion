@@ -153,7 +153,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             scheduleListening(1100)
             return
         }
-        tts.speak(text.take(550), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+        tts.speak(text.take(1600), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
     }
 
     private fun releaseRecognizer() {
