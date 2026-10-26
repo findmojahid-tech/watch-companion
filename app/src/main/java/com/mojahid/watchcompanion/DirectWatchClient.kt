@@ -30,7 +30,8 @@ data class DirectWatchStatus(
     val firmware: String = "",
     val hardware: String = "",
     val message: String = "Connect Watch 7 directly from Momo. MActivePro is not required.",
-    val vendorServices: List<String> = emptyList()
+    val vendorServices: List<String> = emptyList(),
+    val vendorCharacteristics: List<String> = emptyList()
 )
 
 /**
@@ -177,11 +178,27 @@ class DirectWatchClient(private val context: Context) {
                     val knownReads = setOf(manufacturerUuid, firmwareUuid, hardwareUuid, batteryUuid)
                     readQueue.clear()
                     val vendorServices = mutableListOf<String>()
+                    val vendorCharacteristics = mutableListOf<String>()
                     connection.services.forEach { service ->
-                        if (!service.uuid.toString().startsWith("000018")) {
-                            vendorServices += service.uuid.toString()
+                        val serviceId = service.uuid.toString()
+                        val isVendor = !serviceId.startsWith("000018")
+                        if (isVendor) {
+                            vendorServices += serviceId
                         }
                         service.characteristics.forEach { ch ->
+                            if (isVendor) {
+                                val properties = ch.properties
+                                val flags = buildList {
+                                    if (properties and BluetoothGattCharacteristic.PROPERTY_READ != 0) add("READ")
+                                    if (properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0) add("WRITE")
+                                    if (properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0) add("WRITE_NO_RESPONSE")
+                                    if (properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) add("NOTIFY")
+                                    if (properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) add("INDICATE")
+                                }.joinToString("|").ifBlank { "NONE" }
+                                vendorCharacteristics += serviceId + " -> " +
+                                    ch.uuid.toString() + " [" + flags + "]"
+                            }
+
                             if (ch.uuid in knownReads &&
                                 ch.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0) {
                                 readQueue.addLast(ch)
@@ -195,7 +212,8 @@ class DirectWatchClient(private val context: Context) {
                         state = "Connected", isConnected = true, isConnecting = false,
                         message = "Watch 7 is linked directly to Momo (BLE). " +
                             "Watch call audio is a separate Bluetooth profile.",
-                        vendorServices = vendorServices
+                        vendorServices = vendorServices,
+                        vendorCharacteristics = vendorCharacteristics
                     ))
                     readNext(current)
                 }
