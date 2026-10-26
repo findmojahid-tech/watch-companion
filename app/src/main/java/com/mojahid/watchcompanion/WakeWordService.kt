@@ -289,19 +289,6 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun isWake(text: String): Boolean {
-        val lower = text.lowercase(Locale.ROOT)
-        return lower == "momo" || lower.startsWith("momo ") ||
-            lower.startsWith("hey momo") || lower.startsWith("hello momo") ||
-            lower.startsWith("hi momo")
-    }
-
-    private fun stripWake(text: String): String {
-        return text.replace(
-            Regex("""^(?:(?:hey|hello|hi)\s+)?momo[\s,.:!?]*""", RegexOption.IGNORE_CASE),
-            ""
-        ).trim()
-    }
 
     private fun handlePhrase(text: String) {
         if (text.isNotBlank()) {
@@ -311,8 +298,9 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             scheduleListening(800)
             return
         }
-        if (isWake(text)) {
-            val command = stripWake(text)
+        val wake = WakePhrase.parse(text)
+        if (wake.detected) {
+            val command = wake.command
             if (command.isBlank()) {
                 awaitingCommandUntil = SystemClock.elapsedRealtime() + 12000L
                 say("Yes?")
