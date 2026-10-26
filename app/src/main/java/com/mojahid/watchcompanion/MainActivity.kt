@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
@@ -181,10 +182,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             tts.stop()
             tts.shutdown()
         }
-        runCatching { audio.clearCommunicationDevice() }
-        // Wake service owns its audio route if it is still running.
+        // Keep Watch call routed if wake listening still owns communication audio.
         if (!getSharedPreferences("momo_runtime", Context.MODE_PRIVATE)
                 .getBoolean("wake_running", false)) {
+            runCatching { audio.clearCommunicationDevice() }
             runCatching { audio.mode = AudioManager.MODE_NORMAL }
         }
         super.onDestroy()
@@ -235,6 +236,7 @@ fun MomoApp(
     var status by remember { mutableStateOf("Hi! I'm Momo. Say hello, or ask me about your tasks.") }
     var heard by remember { mutableStateOf("") }
     var typed by remember { mutableStateOf("") }
+    var history by remember { mutableStateOf<List<ChatTurn>>(emptyList()) }
     var isBusy by remember { mutableStateOf(false) }
     var listening by remember { mutableStateOf(false) }
     var wakeOn by remember { mutableStateOf(prefs.getBoolean("wake_running", false)) }
@@ -246,7 +248,7 @@ fun MomoApp(
 
     var aiKeyDraft by remember { mutableStateOf("") }
     var hasAiKey by remember { mutableStateOf(!keys.read().isNullOrBlank()) }
-    var aiStatus by remember { mutableStateOf(if (hasAiKey) "Free Gemini AI is configured." else "Gemini AI is not configured yet.") }
+    var aiStatus by remember { mutableStateOf(if (hasAiKey) "A key is saved. Tap Test saved key to verify it." else "No Gemini API key yet. Verify & save a key.") }
     var testingAi by remember { mutableStateOf(false) }
 
     var bleRows by remember { mutableStateOf<List<BleDeviceRow>>(emptyList()) }
@@ -295,16 +297,17 @@ fun MomoApp(
             val local = engine.tryLocal(text)
             val output: TaskReply = if (local != null) local else {
                 val key = keys.read()
-                if (key.isNullOrBlank()) engine.noAiReply()
-                else {
+                if (key.isNullOrBlank()) {
+                    TaskReply("AI isn't connected. Open AI Setup, paste your Gemini key, and press Verify & save.",
+                        engine.tasks(), false)
+                } else {
                     try {
-                        val intent = GeminiClient.interpret(text, engine.tasks(), key)
-                        engine.applyAi(intent)
+                        val answer = GeminiClient.chat(text, history, key)
+                        history = (history + ChatTurn("user", text) + ChatTurn("model", answer)).takeLast(8)
+                        TaskReply(answer, engine.tasks())
                     } catch (error: Exception) {
-                        TaskReply(
-                            "AI is unavailable: " + (error.message ?: "Check your internet or free quota."),
-                            engine.tasks(), false
-                        )
+                        TaskReply("AI error: " + (error.message ?: "Check internet or Gemini quota."),
+                            engine.tasks(), false)
                     }
                 }
             }
@@ -479,9 +482,9 @@ fun MomoApp(
                         Button(
                             onClick = {
                                 runCatching {
+                                    audio.mode = AudioManager.MODE_IN_COMMUNICATION
                                     val ok = audio.setCommunicationDevice(device)
                                     if (ok) {
-                                        audio.mode = AudioManager.MODE_IN_COMMUNICATION
                                         selectedAudio = device
                                         val name = device.productName?.toString().orEmpty()
                                         prefs.edit().putString("preferred_audio_name", name).apply()
