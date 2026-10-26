@@ -82,6 +82,7 @@ fun MomoHome(
     var isBusy by remember { mutableStateOf(false) }
     var voiceBusy by remember { mutableStateOf(false) }
     var wakeEnabled by remember { mutableStateOf(prefs.getBoolean("wake_running", false)) }
+    var wakeInputStatus by remember { mutableStateOf("") }
     var audioChoices by remember { mutableStateOf<List<AudioDeviceInfo>>(emptyList()) }
     var chosenAudio by remember { mutableStateOf<AudioDeviceInfo?>(null) }
     var audioInfo by remember { mutableStateOf("Connect the Watch call Bluetooth profile.") }
@@ -195,6 +196,8 @@ fun MomoHome(
     }
 
     fun startWake() {
+        prefs.edit().remove("wake_last_status").apply()
+        wakeInputStatus = ""
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
             requestPermissions.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
@@ -243,6 +246,7 @@ fun MomoHome(
         while (true) {
             model = offlineStore.status()
             wakeEnabled = prefs.getBoolean("wake_running", false)
+            wakeInputStatus = prefs.getString("wake_last_status", "").orEmpty()
             val wakeReply = prefs.getString("wake_last_answer", "").orEmpty()
             if (wakeReply.isNotBlank() && wakeReply != lastWakeReply) {
                 lastWakeReply = wakeReply
@@ -352,6 +356,9 @@ fun MomoHome(
             )
             if (heard.isNotBlank()) MomoNote("Heard: " + heard)
             if (wakeEnabled) {
+                if (wakeInputStatus.isNotBlank()) {
+                    MomoNote("Watch listening: " + wakeInputStatus)
+                }
                 MomoNote("A visible microphone notification stays on. Android may suspend " +
                     "continuous recognition after locking the phone; this is experimental.")
             }
