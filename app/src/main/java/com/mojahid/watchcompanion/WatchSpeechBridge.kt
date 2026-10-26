@@ -145,10 +145,21 @@ class WatchSpeechBridge(
             onError("First select Watch call under Watch microphone & speaker.")
             return
         }
-        val input = manager.getDevices(AudioManager.GET_DEVICES_INPUTS)
-            .firstOrNull { isBluetoothMicrophone(it.type) }
+        val bluetoothInputs = manager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+            .filter { isBluetoothMicrophone(it.type) }
+        val input = bluetoothInputs.firstOrNull {
+            it.productName?.toString()?.equals(
+                output.productName?.toString(), ignoreCase = true
+            ) == true
+        } ?: bluetoothInputs.singleOrNull()
         if (input == null) {
-            onError("Android doesn't expose a Bluetooth headset microphone. Reconnect Watch call.")
+            onError(
+                if (bluetoothInputs.size > 1) {
+                    "Several Bluetooth microphones are present. Disconnect other headsets and retry."
+                } else {
+                    "Android doesn't expose the Watch call microphone. Reconnect it."
+                }
+            )
             return
         }
 
@@ -185,12 +196,9 @@ class WatchSpeechBridge(
             return
         }
 
-        val preferred = runCatching { mic.setPreferredDevice(input) }.getOrDefault(false)
-        if (!preferred) {
-            mic.release()
-            onError("Android refused the Watch call input preference. Re-select Watch call.")
-            return
-        }
+        // setPreferredDevice() is only a preference, not evidence of active routing.
+        // Android may already route the default mic to Watch call even if it returns false.
+        runCatching { mic.setPreferredDevice(input) }
 
         val pipe = runCatching { ParcelFileDescriptor.createPipe() }.getOrNull()
         if (pipe == null) {
@@ -302,9 +310,11 @@ class WatchSpeechBridge(
 
                         val actual = s.record.routedDevice
                         if (actual != null) {
-                            val isWatch = isBluetoothMicrophone(actual.type)
-                            s.captureRoute = actual.productName?.toString()
-                                ?: "Android input type " + actual.type
+                            val isWatch = isBluetoothMicrophone(actual.type) &&
+                                actual.id == input.id
+                            s.captureRoute = (actual.productName?.toString()
+                                ?: "Android input type " + actual.type) +
+                                " (input ID " + actual.id + ")"
                             s.capturedFromWatch = isWatch
                             s.routeSeen = true
                             if (!isWatch) {
