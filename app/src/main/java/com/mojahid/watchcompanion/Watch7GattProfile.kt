@@ -75,7 +75,8 @@ object Watch7GattProfile {
             exact -> "Watch 7 firmware 4.21 GATT signature matched: " +
                 "$readOnly read-only vendor characteristics, " +
                 "$vendorWriters UNVERIFIED vendor write endpoints, " +
-                "$otaWriters firmware-update write endpoints. " +
+                "$otaWriters Goodix-style OTA-associated write endpoints. " +
+                "The 0402/0403 properties differ from Goodix's published GR551x layout. " +
                 "No confirmed face-transfer command. OTA and unknown writes remain blocked."
             matchingServices -> "Watch 7 vendor service family detected, but firmware, " +
                 "hardware, or characteristic flags differ from the recorded 4.21 profile. " +
