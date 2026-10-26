@@ -1,0 +1,42 @@
+name: Publish Momo V5 APK download
+
+on:
+  push:
+    branches: [ feature/w17-momo-v5-ai-fix ]
+    paths:
+      - ".github/workflows/publish-v5-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download already verified V5 APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          gh run download 40363946628 --repo "${{ github.repository }}" --name WatchCompanion-debug-apk --dir release
+          test -s release/app-debug.apk
+          mv release/app-debug.apk release/Momo-W17-AI-V5.apk
+          file release/Momo-W17-AI-V5.apk
+          sha256sum release/Momo-W17-AI-V5.apk
+
+      - name: Publish public GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v5.0.0-watch-preview release/Momo-W17-AI-V5.apk \
+            --repo "${{ github.repository }}" \
+            --target "000bcab6e03edab39501857a8841cedeeb724d69" \
+            --title "Momo W17 AI V5 - direct Android APK" \
+            --notes "Verified Android V5 APK. This is a phone-powered AI companion for W17 Pro; it does not convert the watch into a standalone Android device. Keep earlier apps installed and set your Gemini API key in V5." \
+            --prerelease
