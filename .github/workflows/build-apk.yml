@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main, "build/**" ]
+    branches: [ main, "build/**", "integration/momo-final" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
