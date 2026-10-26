@@ -67,8 +67,9 @@ class DirectWatchClient(private val context: Context) {
             val devices = adapter?.bondedDevices.orEmpty()
             devices.filter { device ->
                 val name = device.name.orEmpty().lowercase(Locale.ROOT)
-                name.contains("watch") || name.contains("w17") ||
-                    name.contains("momo") || name.contains("mactive")
+                (name.contains("watch") || name.contains("w17") ||
+                    name.contains("momo") || name.contains("mactive")) &&
+                    !name.contains("watch call")
             }.map { device ->
                 BleDeviceRow(device.name ?: "Paired watch", device.address)
             }.sortedBy { if (it.name.contains("Watch 7", true)) 0 else 1 }
