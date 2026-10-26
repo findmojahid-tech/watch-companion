@@ -52,7 +52,8 @@ data class WatchProtocolCapture(
  * Safe operations: discover services; read standard/device vendor info; and
  * with explicit user action subscribe to the exact 4.21 vendor NOTIFY
  * characteristics via the standard CCCD descriptor only.
- * NEVER write proprietary characteristic payloads or OTA/DFU data.
+ * No OTA/DFU or dial payload writes. The owner may explicitly enable ONE
+ * speculative non-OTA product-ID query per temporary capture.
  */
 class DirectWatchClient(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
