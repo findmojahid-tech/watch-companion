@@ -51,6 +51,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
 
     private var recognizer: SpeechRecognizer? = null
     private var watchBridge: WatchSpeechBridge? = null
+    private var watchListening = false
     private lateinit var tts: TextToSpeech
     private lateinit var audio: AudioManager
     private var speechReady = false
@@ -97,6 +98,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         releaseRecognizer()
         watchBridge?.cancel()
         watchBridge = null
+        watchListening = false
         tts.stop()
         tts.shutdown()
         runCatching { audio.clearCommunicationDevice() }
@@ -170,7 +172,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun beginListening() {
-        if (busy || recognizer != null) return
+        if (busy || recognizer != null || watchListening) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
             PackageManager.PERMISSION_GRANTED) return
         if (!SpeechRecognizer.isRecognitionAvailable(this)) return
@@ -195,12 +197,14 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             }
             val locale = prefs.getString("recognition_locale", "en-IN") ?: "en-IN"
             val bridge = watchBridge ?: WatchSpeechBridge(this, audio).also { watchBridge = it }
+            watchListening = true
             bridge.start(
                 language = locale,
                 onStatus = { message ->
                     prefs.edit().putString("wake_last_status", message.take(170)).apply()
                 },
                 onResult = { result ->
+                    watchListening = false
                     errorsInRow = 0
                     if (!result.capturedFromWatch) {
                         prefs.edit().putString("wake_last_status",
@@ -212,6 +216,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                     }
                 },
                 onFailure = { message ->
+                    watchListening = false
                     errorsInRow = (errorsInRow + 1).coerceAtMost(8)
                     prefs.edit().putString("wake_last_status", message.take(170)).apply()
                     scheduleListening((1100L + errorsInRow * 650L).coerceAtMost(6500L))
