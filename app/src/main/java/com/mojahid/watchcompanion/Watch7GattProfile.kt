@@ -77,7 +77,8 @@ object Watch7GattProfile {
                 "$vendorWriters UNVERIFIED vendor write endpoints, " +
                 "$otaWriters Goodix-style OTA-associated write endpoints. " +
                 "The 0402/0403 properties differ from Goodix's published GR551x layout. " +
-                "No confirmed face-transfer command. OTA and unknown writes remain blocked."
+                "No confirmed face-transfer command. Goodix OTA and arbitrary " +
+                "vendor writes are blocked; the optional one-shot ID query is experimental."
             matchingServices -> "Watch 7 vendor service family detected, but firmware, " +
                 "hardware, or characteristic flags differ from the recorded 4.21 profile. " +
                 "No face-transfer command is verified; do not send vendor/OTA writes."
