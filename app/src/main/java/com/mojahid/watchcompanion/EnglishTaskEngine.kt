@@ -62,6 +62,24 @@ class EnglishTaskEngine(context: Context) {
         )
     }
 
+    // Detect whether a speech alternative sounds like a command WITHOUT changing any tasks.
+    fun tryLocalDryRun(raw: String): Boolean {
+        val lower = clean(raw).lowercase(Locale.ROOT)
+        if (lower.isBlank()) return false
+        if (lower in listOf("my tasks", "pending tasks", "tasks", "what is left",
+                "what's left", "anything pending")) return true
+        if (lower.contains("task") &&
+            listOf("what", "show", "list", "how many", "which").any { lower.contains(it) }) return true
+        return listOf(
+            "add ", "create ", "save ", "mark ", "finish ", "complete ",
+            "finished ", "completed ", "reopen ", "restore ", "remind me ",
+            "remember to ", "please add ", "please mark ", "i finished ",
+            "i completed "
+        ).any { lower.startsWith(it) } ||
+            lower.endsWith(" done") || lower.endsWith(" completed") ||
+            lower.endsWith(" finished")
+    }
+
     fun tryLocal(raw: String): TaskReply? {
         val text = clean(raw)
         val lower = text.lowercase(Locale.ROOT)
