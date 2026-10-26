@@ -51,3 +51,27 @@ This does not make it animated or turn the watch into a standalone programmable 
 ## Watch call audio versus BLE inspection
 Bluetooth HFP communication audio and GATT are separate profiles. Closing a GATT
 inspection session is expected, and does not prove voice audio disconnected.
+
+## Cross-device protocol comparison (2026-10-27; not validated on W17 Pro)
+
+Additional reverse-engineering projects establish that custom BLE watch-face uploading
+is technically possible on **other** watches, but their commands must not be
+replayed against this specific firmware:
+
+- CMF Watch Pro 2 protocol research documents a working photo-dial transfer
+  using 8052 / 9063 / 9064 / 9065 and LZ4 RGB565. It was validated on
+  **CMF Watch Pro 2 firmware 1.0.0.73**, not W17 Pro firmware 4.21:
+  https://github.com/joshuapassos/CMF-Watch-Pro-2-BLE-Protocol
+- The Chinese Smartwatch Home Assistant project documents a different
+  feature-flag / command protocol; its watch-face-push flags are **not**
+  evidence that Watch 7 implements those commands:
+  https://github.com/victorbillyph/chinese-smartwatch-homeassistant
+- Fogg's Jieli / HK89 watch dial sender is also a separate platform:
+  https://github.com/MiguelDLM/Fogg
+
+**Decision:** no protocol transplant or trial writes. To identify a compatible
+dial transport, obtain a verified W17 Pro 4.21 SDK or an authorized dial-upload
+trace from the same device/firmware, with service/characteristic mapping,
+encoding, acknowledgment behavior, display dimensions, rollback instructions,
+and proof that the transfer does not enter Goodix DFU. Until then, PNG export
+is an asset only, not a watch-screen feature.
