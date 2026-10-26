@@ -582,13 +582,12 @@ fun MomoApp(
             }
 
             if (tab == 2) {
-                SectionTitle("Free English AI")
+                SectionTitle("Free English AI — ask anything")
                 DarkCard {
                     Text("Google Gemini 3.5 Flash-Lite", color = Color.White, fontWeight = FontWeight.Bold)
-                    Hint("Uses Google's limited free tier. Requires your own free AI Studio API key, " +
-                        "a network connection, and available quota. No credit card is required for a " +
-                        "free-tier project where eligible.")
-                    Text(if (hasAiKey) "AI status: configured" else "AI status: not configured",
+                    Hint("Answers English questions, explanations, creative prompts, and tasks. " +
+                        "Limited free-tier Gemini access requires internet and a verified personal key.")
+                    Text(if (hasAiKey) "A Gemini key is saved" else "No saved Gemini key",
                         color = if (hasAiKey) Cyan else Muted)
                     OutlinedTextField(
                         value = aiKeyDraft, onValueChange = { aiKeyDraft = it.trim().take(250) },
@@ -598,33 +597,42 @@ fun MomoApp(
                     )
                     Button(
                         onClick = {
-                            val saved = keys.save(aiKeyDraft)
-                            if (saved) {
-                                aiKeyDraft = ""
-                                hasAiKey = true
-                                aiStatus = "API key saved securely on this phone."
-                            } else aiStatus = "Couldn't save the key. Check that it isn't blank."
+                            val candidate = aiKeyDraft.trim()
+                            testingAi = true
+                            aiStatus = "Checking free Gemini access with Google..."
+                            scope.launch {
+                                aiStatus = try {
+                                    val check = GeminiClient.verifyKey(candidate)
+                                    if (keys.save(candidate)) {
+                                        aiKeyDraft = ""
+                                        hasAiKey = true
+                                        "Verified using " + check.model + "! " + check.testReply
+                                    } else {
+                                        "Google verified the key, but Android couldn't save it."
+                                    }
+                                } catch (error: Exception) {
+                                    "Key NOT saved: " + (error.message ?: "Unknown verification error.")
+                                }
+                                testingAi = false
+                            }
                         },
-                        enabled = aiKeyDraft.isNotBlank(),
+                        enabled = aiKeyDraft.isNotBlank() && !testingAi,
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("Save API key") }
+                    ) { Text(if (testingAi) "Verifying..." else "Verify & save new API key") }
                     OutlinedButton(
                         onClick = {
-                            val key = keys.read()
-                            if (key.isNullOrBlank()) {
-                                aiStatus = "Save your Gemini API key first."
+                            val stored = keys.read()
+                            if (stored.isNullOrBlank()) {
+                                aiStatus = "No saved key found. Paste a new key above."
                             } else {
                                 testingAi = true
-                                aiStatus = "Testing Gemini..."
+                                aiStatus = "Testing saved key with Google..."
                                 scope.launch {
                                     aiStatus = try {
-                                        val answer = GeminiClient.interpret(
-                                            "Hello Momo! Introduce yourself in one English sentence.",
-                                            emptyList(), key
-                                        )
-                                        "AI connected! " + answer.answer.ifBlank { "Ready to chat." }
+                                        val check = GeminiClient.verifyKey(stored)
+                                        "Gemini connected: " + check.model + "! " + check.testReply
                                     } catch (error: Exception) {
-                                        "AI test failed: " + (error.message ?: "Check key and quota.")
+                                        "Saved key test failed: " + (error.message ?: "Unknown error.")
                                     }
                                     testingAi = false
                                 }
@@ -632,7 +640,7 @@ fun MomoApp(
                         },
                         enabled = !testingAi,
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text(if (testingAi) "Testing..." else "Test free AI") }
+                    ) { Text(if (testingAi) "Testing..." else "Test saved key") }
                     OutlinedButton(onClick = {
                         keys.clear()
                         hasAiKey = false
@@ -664,9 +672,12 @@ fun MomoApp(
 
                 DarkCard {
                     SectionTitle("How to get a free key")
-                    Hint("Open https://aistudio.google.com/apikey in your phone browser, sign in, " +
-                        "create a Gemini API key (free tier), copy it, then return and paste it above. " +
-                        "Never post the key in GitHub or ChatGPT.")
+                    Hint("Get a free-tier eligible Google AI Studio key, paste it above, and press " +
+                        "Verify & save. Don't share your API key in screenshots or ChatGPT.")
+                    OutlinedButton(onClick = {
+                        context.startActivity(Intent(Intent.ACTION_VIEW,
+                            Uri.parse("https://aistudio.google.com/apikey")))
+                    }, modifier = Modifier.fillMaxWidth()) { Text("Open Google AI Studio") }
                 }
             }
 
