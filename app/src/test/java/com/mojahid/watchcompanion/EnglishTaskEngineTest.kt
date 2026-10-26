@@ -85,6 +85,13 @@ class EnglishTaskEngineTest {
         assertEquals("call the client", engine.tasks().single().title)
     }
 
+    @Test fun repeatedCommandsCannotCreateSameTaskId() {
+        repeat(8) { engine.tryLocal("Add a task to check item " + it) }
+        val saved = EnglishTaskEngine(context).tasks()
+        assertEquals(8, saved.size)
+        assertEquals(8, saved.map { it.id }.toSet().size)
+    }
+
     @Test fun repeatedSaveKeepsTasksInCorrectOrder() {
         val store = TaskStore(context)
         val value = listOf(TaskItem(101, "Design packaging"), TaskItem(102, "Print samples", true))
