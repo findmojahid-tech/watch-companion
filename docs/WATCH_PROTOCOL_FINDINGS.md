@@ -182,10 +182,20 @@ claim that it has been exercised on the owner's physical watch.
 - Record no more than 48 lines; display up to 36 bytes per payload. Captures
   are held in app memory only and can be copied **at the owner's request**.
   Bluetooth messages can contain health/personal data: review before sharing.
-- OTA service `a6ed0401` is excluded from every read/notify operation in
-  this experiment, not merely from transmission. No OTA or proprietary
-  characteristic writes, bootloader unlocks, Android root, new permissions,
-  or phone firmware changes.
+- OTA service `a6ed0401` is excluded from every read/notify and write
+  operation. No bootloader unlocks, Android root, new permissions, phone
+  settings or phone firmware changes.
+- With explicit **watch-risk opt-in**, one additional experimental action may
+  send the fixed six-byte `BC 3C 01 01 00 00` *product ID request* to
+  **one** of the actual vendor characteristics `6e40000b` OR `6e40000c`
+  (service `6e40000a`). It uses a GATT write-with-response, max one
+  attempt per 30-second session, never retries automatically and captures the
+  GATT result/any subsequent notification. The command is from a DIFFERENT
+  Microwear/NJJ watch protocol using `FF02` and has **NOT** been validated
+  on W17 Pro. It could be ignored, disconnect or damage the watch; the owner
+  explicitly accepts watch-side experimentation. It cannot flash the Android
+  phone and does not send a watchface. Source:
+  https://github.com/pedrohsipriano/hub-saude#protocolo-log-hci-de-16102026-lido-com-toolsbtsnoopmjs
 
 This observer may reveal actual vendor characteristic values and
 notifications (for example, when changing a dial directly on the watch).
@@ -195,6 +205,8 @@ device-specific transfer scheme is still necessary.
 
 Previously documented read-only Watch Lab and V10 APK behavior remain
 unchanged; the new capture controls exist in branch source only until an
-approved consolidated release. The Android CI static safety check now allows
-only the two code paths for standard 0x2902 CCCD subscription; it rejects
-new characteristic write APIs and descriptor writers elsewhere.
+approved consolidated release. The Android CI static safety check allows **exactly two API-version
+overloads** for the opt-in one-shot vendor identification query and two
+API-version overloads for standard 0x2902 CCCD subscriptions, all in
+`DirectWatchClient` and constrained by runtime allowlists. It blocks any
+new characteristic or descriptor writer outside that class.
