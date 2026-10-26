@@ -69,7 +69,7 @@ fun MomoHome(
     val keys = remember { AiKeyStore(context) }
     val offlineStore = remember { OfflineModelStore(context) }
     val diagnostics = remember { BleDiagnostics(context) }
-    val directWatch = remember { DirectWatchClient(context) }
+    val directWatch = remember { DirectWatchSession.get(context.applicationContext) }
     val watch by directWatch.state.collectAsState()
     val scope = rememberCoroutineScope()
 
@@ -119,6 +119,9 @@ fun MomoHome(
             status = "Microphone permission is required to listen for Momo."
         }
         pairedWatches = directWatch.pairedWatches()
+        if (result[Manifest.permission.BLUETOOTH_CONNECT] == true) {
+            directWatch.reconnectIfEnabled()
+        }
     }
 
     fun audioRefresh() {
@@ -230,6 +233,7 @@ fun MomoHome(
         requestPermissions.launch(permissions.toTypedArray())
         audioRefresh()
         pairedWatches = directWatch.pairedWatches()
+        directWatch.reconnectIfEnabled()
     }
 
     // Refresh model download and show last recognized wake conversation without requiring
@@ -255,7 +259,7 @@ fun MomoHome(
     DisposableEffect(Unit) {
         onDispose {
             diagnostics.close()
-            directWatch.close()
+            // DirectWatchSession is app-scoped: changing pages does not disconnect watch.
         }
     }
 
