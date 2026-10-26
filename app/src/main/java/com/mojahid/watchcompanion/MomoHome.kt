@@ -71,6 +71,7 @@ fun MomoHome(
     val diagnostics = remember { BleDiagnostics(context) }
     val directWatch = remember { DirectWatchSession.get(context.applicationContext) }
     val watch by directWatch.state.collectAsState()
+    val watchProbe by directWatch.protocolCapture.collectAsState()
     val scope = rememberCoroutineScope()
 
     var model by remember { mutableStateOf(ModelDownloadStatus("Checking offline AI...")) }
@@ -814,6 +815,56 @@ fun MomoHome(
                 }
             } else {
                 MomoNote("Connect Watch 7 above to inspect its dial communication capabilities.")
+            }
+
+            HorizontalDivider(color = Color(0xFF35495C))
+            Text("Watch-only BLE experiment", color = Color.White,
+                fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+            MomoNote("For Watch 7 firmware 4.21 only. Read five unknown vendor " +
+                "values and listen to eight notification sources for 30 seconds. " +
+                "Only standard BLE notification subscriptions are written. " +
+                "No dial, proprietary command, OTA, or phone setting is changed.")
+            OutlinedButton(
+                onClick = { directWatch.startPassiveCapture() },
+                enabled = watch.isConnected && !watchProbe.running,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Capture 30 seconds of watch BLE traffic")
+            }
+            if (watchProbe.running) {
+                TextButton(onClick = { directWatch.stopPassiveCapture() },
+                    modifier = Modifier.fillMaxWidth()) {
+                    Text("Stop capture and reconnect watch")
+                }
+            }
+            MomoNote(watchProbe.status)
+            if (watchProbe.events.isNotEmpty()) {
+                MomoNote("Capture records: " + watchProbe.events.size +
+                    " (notifications: " + watchProbe.receivedPackets + "). " +
+                    "Data remains in memory; no automatic uploads.")
+                Text(
+                    watchProbe.events.takeLast(15).joinToString("\n"),
+                    color = MomoSoft,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedButton(onClick = {
+                    val summary = buildString {
+                        append("MOMO Watch 7 passive BLE capture\n")
+                        append("Firmware 4.21 / hardware 1.0; watch-only; no vendor commands\n")
+                        append("Notification count: ").append(watchProbe.receivedPackets)
+                        append("\n").append(watchProbe.events.joinToString("\n"))
+                    }
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as ClipboardManager
+                    clipboard.setPrimaryClip(
+                        ClipData.newPlainText("Momo watch protocol evidence", summary)
+                    )
+                    dialInfo = "Watch-only capture copied. Review the hex for " +
+                        "private health/device data before sharing publicly."
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Copy captured BLE observations")
+                }
             }
             if (dialInfo.isNotBlank()) MomoNote(dialInfo)
             MomoNote("For safety, this build will not send unknown firmware-update " +
