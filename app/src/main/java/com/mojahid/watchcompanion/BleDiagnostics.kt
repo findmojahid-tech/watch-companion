@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
@@ -16,13 +17,17 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import java.util.ArrayDeque
 
 data class BleDeviceRow(val name: String, val address: String)
 data class BleInspection(val device: BleDeviceRow, val services: List<String>, val note: String)
 
 /**
- * Read-only GATT diagnostics. It is NOT a persistent watch-control connection.
- * A normal GATT disconnect after discovery does not mean Bluetooth call audio disconnected.
+ * Watch protocol inspection ONLY. No GATT characteristic/descriptor writes, notification
+ * subscriptions, OTA commands, watch-face uploads or firmware modifications are performed.
+ *
+ * In particular A6ED0401 is a Goodix OTA/DFU service, not proof that the watch's UI is
+ * programmable or that the main MCU is Goodix. Do not send commands to that service.
  */
 class BleDiagnostics(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
@@ -88,7 +93,7 @@ class BleDiagnostics(private val context: Context) {
             stopScan()
             onStatus(
                 if (found.isEmpty()) "No BLE devices found. Try with the watch screen awake."
-                else "Scan finished. Tap your watch to inspect read-only BLE services."
+                else "Scan finished. Tap your watch for a read-only protocol audit."
             )
         }
         stopScanRunnable = stopper
@@ -115,6 +120,58 @@ class BleDiagnostics(private val context: Context) {
         if (old != null) runCatching { old.disconnect(); old.close() }
     }
 
+    private fun serviceLabel(uuid: String): String {
+        return when {
+            uuid.startsWith("00001800") -> "Generic Access (standard)"
+            uuid.startsWith("00001801") -> "Generic Attribute (standard)"
+            uuid.startsWith("0000180a") -> "Device Information (standard)"
+            uuid.startsWith("0000180f") -> "Battery (standard)"
+            uuid.startsWith("00001812") -> "Human Interface Device / HID (standard)"
+            uuid.startsWith("a6ed0401", true) ->
+                "Goodix OTA/DFU firmware update channel -- DO NOT WRITE"
+            uuid.startsWith("6e4000", true) ->
+                "Custom 6E40 vendor channel -- protocol UNKNOWN"
+            else -> "Unidentified service"
+        }
+    }
+
+    private fun characteristicProperties(ch: BluetoothGattCharacteristic): String {
+        val bits = ch.properties
+        val flags = mutableListOf<String>()
+        if (bits and BluetoothGattCharacteristic.PROPERTY_READ != 0) flags += "READ"
+        if (bits and BluetoothGattCharacteristic.PROPERTY_WRITE != 0) flags += "WRITE"
+        if (bits and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0) flags += "WRITE_NO_RESPONSE"
+        if (bits and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) flags += "NOTIFY"
+        if (bits and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) flags += "INDICATE"
+        if (bits and BluetoothGattCharacteristic.PROPERTY_SIGNED_WRITE != 0) flags += "SIGNED_WRITE"
+        return if (flags.isEmpty()) "none" else flags.joinToString("|")
+    }
+
+    private fun standardReadLabel(uuid: String): String? = when {
+        uuid.startsWith("00002a00") -> "Device name"
+        uuid.startsWith("00002a26") -> "Firmware revision"
+        uuid.startsWith("00002a27") -> "Hardware revision"
+        uuid.startsWith("00002a28") -> "Software revision"
+        uuid.startsWith("00002a29") -> "Manufacturer"
+        uuid.startsWith("00002a19") -> "Battery level"
+        else -> null
+    }
+
+    private fun prettyValue(ch: BluetoothGattCharacteristic, bytes: ByteArray): String {
+        if (bytes.isEmpty()) return "(empty)"
+        if (ch.uuid.toString().startsWith("00002a19")) {
+            return (bytes[0].toInt() and 0xff).toString() + "%"
+        }
+        val clean = String(bytes, Charsets.UTF_8).trim().trim('\u0000')
+        return if (clean.isNotBlank() && clean.length <= 160 &&
+            clean.all { it.isLetterOrDigit() || it == ' ' || it in "-_.,:+/()" }) {
+            clean
+        } else {
+            bytes.take(48).joinToString(" ") { "%02X".format(it.toInt() and 0xff) } +
+                if (bytes.size > 48) " ..." else ""
+        }
+    }
+
     @SuppressLint("MissingPermission")
     fun inspect(
         row: BleDeviceRow,
@@ -126,92 +183,153 @@ class BleDiagnostics(private val context: Context) {
             return
         }
         stopScan()
-        closeGatt()
         generation += 1
-        val currentGeneration = generation
+        closeGatt()
+        val session = generation
         var finished = false
+        val details = mutableListOf<String>()
+        val readQueue = ArrayDeque<BluetoothGattCharacteristic>()
         val device = runCatching { adapter?.getRemoteDevice(row.address) }.getOrNull() ?: run {
             onStatus("That BLE address isn't available. Scan again.")
             return
         }
 
-        fun reportFailure(message: String) {
+        fun finish(message: String, successful: Boolean) {
             handler.post {
-                if (currentGeneration != generation || finished) return@post
+                if (session != generation || finished) return@post
                 finished = true
                 closeGatt()
-                onStatus(message + " Bluetooth call audio is separate from this test.")
+                if (successful) {
+                    onResult(BleInspection(row, details.toList(), message))
+                } else {
+                    onStatus(message + " Bluetooth call audio is a separate connection.")
+                }
+            }
+        }
+
+        fun startNextRead(g: BluetoothGatt) {
+            if (session != generation || finished) return
+            if (readQueue.isEmpty()) {
+                finish(
+                    "Read-only audit completed. The temporary BLE connection is now " +
+                        "closed intentionally. A Goodix OTA UUID is not a watch-face API. " +
+                        "No firmware or watch settings were changed.",
+                    true
+                )
+                return
+            }
+            val ch = readQueue.removeFirst()
+            val label = standardReadLabel(ch.uuid.toString()) ?: "Standard information"
+            if (!runCatching { g.readCharacteristic(ch) }.getOrDefault(false)) {
+                details += "  " + label + ": not readable (read request rejected)"
+                startNextRead(g)
             }
         }
 
         val cb = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, state: Int) {
-                if (currentGeneration != generation) return
+                if (session != generation || finished) return
                 if (status == BluetoothGatt.GATT_SUCCESS &&
                     state == BluetoothProfile.STATE_CONNECTED) {
-                    val requested = runCatching { g.discoverServices() }.getOrDefault(false)
-                    if (!requested) reportFailure("Service discovery couldn't start.")
-                } else if (state == BluetoothProfile.STATE_DISCONNECTED && !finished) {
-                    reportFailure(
-                        "The watch ended this diagnostic BLE session (code " + status +
-                            "). Its firmware or companion app may only allow one BLE client."
+                    if (!runCatching { g.discoverServices() }.getOrDefault(false)) {
+                        finish("BLE service discovery could not start.", false)
+                    }
+                } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
+                    finish(
+                        "Watch closed the diagnostic BLE session (code " + status + "). " +
+                            "Its firmware or companion app may limit concurrent BLE connections.",
+                        false
                     )
                 }
             }
 
             override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-                if (currentGeneration != generation || finished) return
+                if (session != generation || finished) return
                 if (status != BluetoothGatt.GATT_SUCCESS) {
-                    reportFailure("BLE service discovery failed (code " + status + ").")
+                    finish("BLE service discovery failed, code " + status + ".", false)
                     return
                 }
-
-                val names = g.services.flatMap { service ->
-                    buildList {
-                        add("Service: " + service.uuid.toString())
-                        service.characteristics.forEach { characteristic ->
-                            add("  Characteristic: " + characteristic.uuid.toString())
+                handler.post {
+                    if (session != generation || finished) return@post
+                    g.services.forEach { service ->
+                        val serviceId = service.uuid.toString()
+                        details += "Service: " + serviceId + " [" + serviceLabel(serviceId) + "]"
+                        service.characteristics.forEach { ch ->
+                            val properties = characteristicProperties(ch)
+                            details += "  Characteristic: " + ch.uuid.toString() +
+                                " [" + properties + "]"
+                            val label = standardReadLabel(ch.uuid.toString())
+                            if (label != null &&
+                                ch.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0 &&
+                                (serviceId.startsWith("00001800") ||
+                                 serviceId.startsWith("0000180a") ||
+                                 serviceId.startsWith("0000180f"))) {
+                                readQueue.addLast(ch)
+                            }
                         }
                     }
+                    onStatus("Found services. Reading standard device info only...")
+                    startNextRead(g)
                 }
-                finished = true
+            }
+
+            @Suppress("DEPRECATION")
+            override fun onCharacteristicRead(
+                g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int
+            ) {
+                handleRead(g, characteristic, characteristic.value ?: byteArrayOf(), status)
+            }
+
+            override fun onCharacteristicRead(
+                g: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                value: ByteArray,
+                status: Int
+            ) {
+                handleRead(g, characteristic, value, status)
+            }
+
+            private fun handleRead(
+                g: BluetoothGatt,
+                ch: BluetoothGattCharacteristic,
+                bytes: ByteArray,
+                status: Int
+            ) {
                 handler.post {
-                    if (currentGeneration != generation) return@post
-                    closeGatt()
-                    onResult(
-                        BleInspection(
-                            row, names,
-                            "BLE inspection completed. The short diagnostic connection was " +
-                                "closed intentionally. Watch call audio should remain separate. " +
-                                "Watch-face protocol compatibility is NOT confirmed yet."
-                        )
-                    )
+                    if (session != generation || finished) return@post
+                    val label = standardReadLabel(ch.uuid.toString()) ?: "Info"
+                    details += if (status == BluetoothGatt.GATT_SUCCESS) {
+                        "  " + label + ": " + prettyValue(ch, bytes)
+                    } else {
+                        "  " + label + ": read unavailable (status " + status + ")"
+                    }
+                    startNextRead(g)
                 }
             }
         }
 
-        onStatus("Connecting to " + row.name + " to inspect read-only BLE services...")
+        onStatus("Inspecting " + row.name + " read-only BLE profile...")
         val opened = runCatching {
             device.connectGatt(context, false, cb, BluetoothDevice.TRANSPORT_LE)
         }.getOrNull()
         if (opened == null) {
-            reportFailure("Unable to open a GATT connection.")
+            finish("Could not open BLE diagnostics.", false)
             return
         }
         gatt = opened
 
         val timeout = Runnable {
-            if (currentGeneration == generation && !finished) {
-                finished = true
-                closeGatt()
-                onStatus(
-                    "BLE inspection timed out. The watch may be controlled by another app. " +
-                        "This does not prove watch call audio is disconnected."
+            if (session == generation && !finished) {
+                val whatRead = details.size
+                finish(
+                    "BLE audit timed out after reading " + whatRead + " lines. " +
+                        "Try while the watch is awake; close its official companion app if necessary.",
+                    false
                 )
             }
         }
         timeoutRunnable = timeout
-        handler.postDelayed(timeout, 11000)
+        handler.postDelayed(timeout, 18000)
     }
 
     fun close() {
