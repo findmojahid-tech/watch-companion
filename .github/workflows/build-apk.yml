@@ -19,14 +19,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prevent unreviewed watch firmware writes
+      - name: Block watch firmware/data writes; allow controlled CCCD subscriptions
         shell: bash
         run: |
           set -euo pipefail
-          if grep -R -nE 'writeCharacteristic[[:space:]]*\\(|writeDescriptor[[:space:]]*\\(' app/src/main/java; then
-            echo "Unreviewed BLE write API detected. Stop: firmware safety gate failed."
+          # Never allow vendor characteristic writes, including OTA/DFU uploads.
+          if grep -R -nE 'writeCharacteristic[[:space:]]*\\(' app/src/main/java; then
+            echo "Proprietary BLE characteristic writer detected. Stop."
             exit 1
           fi
+          # The only allowed descriptor writes are Android notification CCCD
+          # subscriptions in DirectWatchClient, which runtime-checks the
+          # actual Watch 7 4.21 GATT signature and a fixed allowlist.
+          unsafe=$(grep -R -nE 'writeDescriptor[[:space:]]*\\(' app/src/main/java \\
+            | grep -v 'DirectWatchClient.kt:' || true)
+          if [ -n "$unsafe" ]; then
+            echo "$unsafe"
+            echo "Unexpected descriptor writer detected. Stop."
+            exit 1
+          fi
+          file=app/src/main/java/com/mojahid/watchcompanion/DirectWatchClient.kt
+          count=$(grep -cE 'writeDescriptor[[:space:]]*\\(' "$file" || true)
+          if [ "$count" -ne 2 ]; then
+            echo "Unexpected number of CCCD write sites: $count"
+            exit 1
+          fi
+          grep -q 'Watch7PassiveProbe.canSubscribe' "$file"
+          grep -q '00002902-0000-1000-8000-00805f9b34fb' "$file"
+          grep -q 'BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE' "$file"
 
       - name: Verify low-RAM Momo watch-face renderer
         shell: bash
