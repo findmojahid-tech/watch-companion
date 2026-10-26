@@ -19,6 +19,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify low-RAM Momo watch-face renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcc -std=c11 -Wall -Wextra -Werror -pedantic \
+            watch-firmware/momo_face_renderer.c \
+            watch-firmware/tests/test_momo_face.c \
+            -o /tmp/momo_face_test
+          /tmp/momo_face_test
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
