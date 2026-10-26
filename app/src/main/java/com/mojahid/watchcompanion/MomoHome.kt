@@ -96,6 +96,7 @@ fun MomoHome(
         mutableStateOf("Speaker confirmed by user. Microphone source still needs testing.")
     }
     var showAdvanced by remember { mutableStateOf(false) }
+    var watchProbeAccepted by remember { mutableStateOf(false) }
     var showTasks by remember { mutableStateOf(false) }
     var tasks by remember { mutableStateOf(taskEngine.tasks()) }
     var aiKey by remember { mutableStateOf("") }
@@ -832,6 +833,32 @@ fun MomoHome(
                 Text("Capture 30 seconds of watch BLE traffic")
             }
             if (watchProbe.running) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = watchProbeAccepted,
+                        onCheckedChange = { watchProbeAccepted = it }
+                    )
+                    Text("I accept the risk of ONE unknown watch-side command. " +
+                        "Pixel 7 firmware and settings will not be modified.",
+                        color = MomoSoft, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { directWatch.sendExperimentalProductId("0b") },
+                        enabled = watchProbeAccepted,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("ID query on 0b") }
+                    OutlinedButton(
+                        onClick = { directWatch.sendExperimentalProductId("0c") },
+                        enabled = watchProbeAccepted,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("ID query on 0c") }
+                }
+                MomoNote("Only one query per capture, on 0b OR 0c. " +
+                    "The fixed query is borrowed from an unrelated Microwear/NJJ " +
+                    "protocol, so it may do nothing or disrupt the watch. " +
+                    "It never writes to the Goodix OTA service.")
                 TextButton(onClick = { directWatch.stopPassiveCapture() },
                     modifier = Modifier.fillMaxWidth()) {
                     Text("Stop capture and reconnect watch")
