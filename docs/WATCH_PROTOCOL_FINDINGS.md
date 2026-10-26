@@ -19,6 +19,12 @@ References:
 
 **The canonical Nordic UART service UUID is `6e400001-...`**. It was not discovered on this watch. The custom `6e400004` and `6e40000a` services should *not* be assumed to implement Nordic UART or Jieli RCSP.
 
+## Installation / data preservation
+The V4 diagnostics **debug APK** uses its own Android application ID suffix `.watchlab`
+and the launcher label **Momo Watch Lab V4**. It installs **beside Momo V3**
+rather than replacing its debug signing certificate or erasing existing saved tasks.
+Keep the V3 app; use the separate Watch Lab app only for the protocol inspection.
+
 ## What V4 Watch Lab does
 - Scan nearby BLE devices.
 - Connect briefly and enumerate services, characteristics, and standard GATT property flags.
