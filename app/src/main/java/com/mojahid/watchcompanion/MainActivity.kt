@@ -2,9 +2,11 @@ package com.mojahid.watchcompanion
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -17,9 +19,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -67,9 +69,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale("en", "BD")
-        }
+        if (status == TextToSpeech.SUCCESS) tts.language = Locale("en", "BD")
     }
 
     override fun onDestroy() {
@@ -80,7 +80,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 }
 
-data class TaskItem(val id: Long, val title: String, val done: Boolean = false)
 enum class FaceState { IDLE, LISTENING, THINKING, HAPPY, CONFUSED }
 
 @Composable
@@ -90,18 +89,27 @@ fun CompanionApp(
     createRecognizer: () -> SpeechRecognizer
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var tasks by remember { mutableStateOf(listOf<TaskItem>()) }
+    val taskStore = remember { TaskStore(context) }
+    val engine = remember { CommandEngine(context) }
+    val ble = remember { BleDiagnostics(context) }
+
+    var tasks by remember { mutableStateOf(taskStore.load()) }
     var face by remember { mutableStateOf(FaceState.IDLE) }
     var transcript by remember { mutableStateOf("Ready") }
     var lastHeard by remember { mutableStateOf("") }
     var watchDevices by remember { mutableStateOf<List<AudioDeviceInfo>>(emptyList()) }
     var selectedDevice by remember { mutableStateOf<AudioDeviceInfo?>(null) }
+    var wakeEnabled by remember { mutableStateOf(false) }
+
+    var bleDevices by remember { mutableStateOf<List<BleDeviceRow>>(emptyList()) }
+    var bleStatus by remember { mutableStateOf("Not scanned yet") }
+    var inspection by remember { mutableStateOf<BleInspection?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { }
 
-    fun refreshDevices() {
+    fun refreshAudioDevices() {
         watchDevices = audioManager.availableCommunicationDevices.filter {
             it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
                 it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
@@ -110,173 +118,69 @@ fun CompanionApp(
         selectedDevice = audioManager.communicationDevice
     }
 
-    LaunchedEffect(Unit) {
-        val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
-        if (android.os.Build.VERSION.SDK_INT >= 31) perms += Manifest.permission.BLUETOOTH_CONNECT
-        permissionLauncher.launch(perms.toTypedArray())
-        refreshDevices()
-    }
-
     fun reply(text: String, state: FaceState = FaceState.HAPPY) {
         transcript = text
         face = state
         onSpeak(text)
     }
 
-    fun normalizeCommand(value: String): String =
-        value.lowercase()
-            .replace("কাজ", " task ")
-            .replace("টাস্ক", " task ")
-            .replace("যোগ", " add ")
-            .replace("করো", " koro ")
-            .replace("কর", " koro ")
-            .replace("বাকি", " baki ")
-            .replace("শেষ", " done ")
-            .replace("হয়ে গেছে", " done ")
-            .replace("হয়ে গেছে", " done ")
-            .replace("পেন্ডিং", " pending ")
-            .replace(Regex("[^a-z0-9\\u0980-\\u09FF ]"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-
-    fun processCommand(raw: String): Boolean {
-        val text = raw.trim()
-        if (text.isBlank()) return false
-        face = FaceState.THINKING
-        val lower = normalizeCommand(text)
-
-        val asksPending =
-            lower.contains("ki ki baki") ||
-            lower.contains("ki baki") ||
-            lower.contains("what is pending") ||
-            lower.contains("pending task") ||
-            lower == "pending" ||
-            lower == "baki" ||
-            (lower.contains("baki") && (lower.contains("task") || lower.contains("kaj")))
-
-        val asksReopen =
-            lower.contains("abar pending") ||
-            lower.contains("reopen") ||
-            lower.contains("back to pending")
-
-        val asksDone =
-            lower.contains(" done") ||
-            lower.endsWith("done") ||
-            lower.contains("complete") ||
-            lower.contains("finished") ||
-            lower.endsWith(" dan") ||
-            lower.contains(" mark done")
-
-        val asksAdd =
-            lower.contains("add koro") ||
-            lower.contains("ad koro") ||
-            lower.contains("task add") ||
-            lower.contains("add task") ||
-            lower.contains("task dao") ||
-            lower.contains("task rakho") ||
-            lower.contains("list e add") ||
-            lower.contains("liste add") ||
-            lower.startsWith("add ")
-
-        when {
-            asksPending -> {
-                val pending = tasks.filterNot { it.done }
-                if (pending.isEmpty()) reply("Kono task baki nei.")
-                else reply("Baki ache: " + pending.joinToString(", ") { it.title })
-                return true
-            }
-
-            asksReopen -> {
-                val name = text
-                    .replace(Regex("(?i)abar\\s+pending"), "")
-                    .replace(Regex("(?i)reopen"), "")
-                    .replace(Regex("(?i)back\\s+to\\s+pending"), "")
-                    .trim(' ', '.', ',')
-                val match = tasks.lastOrNull {
-                    it.title.contains(name, true) || name.contains(it.title, true)
-                }
-                if (match == null) reply("Task ta khuje pai ni.", FaceState.CONFUSED)
-                else {
-                    tasks = tasks.map { if (it.id == match.id) it.copy(done = false) else it }
-                    reply("${match.title} abar pending korechi.")
-                }
-                return true
-            }
-
-            asksDone -> {
-                val name = text
-                    .replace(Regex("(?i)\\bdone\\b"), "")
-                    .replace(Regex("(?i)\\bcomplete(d)?\\b"), "")
-                    .replace(Regex("(?i)\\bfinished\\b"), "")
-                    .replace(Regex("(?i)\\bdan\\b"), "")
-                    .replace(Regex("(?i)mark\\s+done"), "")
-                    .trim(' ', '.', ',')
-                val match = tasks.lastOrNull {
-                    it.title.contains(name, true) || name.contains(it.title, true)
-                }
-                if (match == null) reply("Kon task ta done bujhte parini.", FaceState.CONFUSED)
-                else {
-                    tasks = tasks.map { if (it.id == match.id) it.copy(done = true) else it }
-                    reply("${match.title} done mark korechi.")
-                }
-                return true
-            }
-
-            asksAdd -> {
-                val title = text
-                    .replace(Regex("(?i)task\\s+add\\s+koro"), "")
-                    .replace(Regex("(?i)add\\s+task"), "")
-                    .replace(Regex("(?i)add\\s+koro"), "")
-                    .replace(Regex("(?i)ad\\s+koro"), "")
-                    .replace(Regex("(?i)task\\s+dao"), "")
-                    .replace(Regex("(?i)task\\s+rakho"), "")
-                    .replace(Regex("(?i)list(e)?\\s+add"), "")
-                    .replace(Regex("(?i)^add\\s+"), "")
-                    .replace("যোগ", "")
-                    .replace("করো", "")
-                    .replace("কর", "")
-                    .replace("টাস্ক", "")
-                    .replace("কাজ", "")
-                    .trim(' ', '.', ',')
-
-                if (title.isBlank()) reply("Task-er nam bolo.", FaceState.CONFUSED)
-                else {
-                    tasks = tasks + TaskItem(System.currentTimeMillis(), title)
-                    reply("$title task add korechi.")
-                }
-                return true
-            }
-
-            else -> return false
-        }
-    }
-
-    fun processSpeechCandidates(candidates: List<String>) {
+    fun processCandidates(candidates: List<String>) {
         if (candidates.isEmpty()) {
             reply("Kichu shunte paini.", FaceState.CONFUSED)
             return
         }
-
         lastHeard = candidates.first()
-        val matched = candidates.firstOrNull { processCommand(it) != false }
-        if (matched == null) {
-            transcript = "Command ta bujhte parini."
-            face = FaceState.CONFUSED
-            onSpeak("Command ta bujhte parini.")
-        } else {
-            lastHeard = matched
+        var best: CommandEngine.Result? = null
+        for (candidate in candidates) {
+            val result = engine.process(candidate)
+            if (result.matched) {
+                best = result
+                lastHeard = candidate
+                break
+            }
         }
+        val result = best ?: engine.process(candidates.first())
+        tasks = result.tasks
+        reply(result.reply, if (result.matched) FaceState.HAPPY else FaceState.CONFUSED)
+    }
+
+    fun startWakeMode() {
+        ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
+        wakeEnabled = true
+        reply("Wake mode on. Momo bole dakba.")
+    }
+
+    fun stopWakeMode() {
+        val intent = Intent(context, WakeWordService::class.java).apply { action = WakeWordService.ACTION_STOP }
+        context.startService(intent)
+        wakeEnabled = false
+        reply("Wake mode off.", FaceState.IDLE)
+    }
+
+    LaunchedEffect(Unit) {
+        val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= 31) {
+            perms += Manifest.permission.BLUETOOTH_CONNECT
+            perms += Manifest.permission.BLUETOOTH_SCAN
+        }
+        if (Build.VERSION.SDK_INT >= 33) perms += Manifest.permission.POST_NOTIFICATIONS
+        permissionLauncher.launch(perms.toTypedArray())
+        refreshAudioDevices()
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF0B0B0F)).padding(20.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0B0B0F))
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CompanionFace(face, Modifier.size(120.dp))
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text("Watch Companion", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("Momo Companion", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(transcript, color = Color(0xFFB8B8C4))
                 if (lastHeard.isNotBlank()) {
                     Text("Heard: $lastHeard", color = Color(0xFF7D7D8A), style = MaterialTheme.typography.bodySmall)
@@ -286,14 +190,14 @@ fun CompanionApp(
 
         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF17171D))) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Watch audio", fontWeight = FontWeight.SemiBold)
+                Text("1. Watch audio", fontWeight = FontWeight.SemiBold)
                 if (watchDevices.isEmpty()) {
                     Text("No Bluetooth call audio device detected.", color = Color(0xFFB8B8C4))
                 } else {
                     watchDevices.forEach { device ->
                         Button(
                             onClick = {
-                                val allowed = android.os.Build.VERSION.SDK_INT < 31 ||
+                                val allowed = Build.VERSION.SDK_INT < 31 ||
                                     ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
                                 if (allowed) {
                                     audioManager.setCommunicationDevice(device)
@@ -308,15 +212,33 @@ fun CompanionApp(
                         }
                     }
                 }
-                OutlinedButton(onClick = { refreshDevices() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Refresh devices")
+                OutlinedButton(onClick = { refreshAudioDevices() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Refresh audio devices")
                 }
-                OutlinedButton(
-                    onClick = { onSpeak("Watch speaker test. Shunte paccho?") },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                OutlinedButton(onClick = { onSpeak("Momo watch speaker test. Shunte paccho?") }, modifier = Modifier.fillMaxWidth()) {
                     Text("Test watch speaker")
                 }
+            }
+        }
+
+        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF17171D))) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("2. Wake Mode", fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (wakeEnabled) "Listening for: Momo / Hey Momo" else "Off — enable kore Momo bole dakba",
+                    color = Color(0xFFB8B8C4)
+                )
+                Button(
+                    onClick = { if (wakeEnabled) stopWakeMode() else startWakeMode() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (wakeEnabled) "Turn Wake Mode Off" else "Turn Wake Mode On")
+                }
+                Text(
+                    "Android foreground microphone service use kore, tai notification visible thakbe.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF7D7D8A)
+                )
             }
         }
 
@@ -326,32 +248,92 @@ fun CompanionApp(
                     lastHeard = candidates.first()
                     transcript = candidates.first()
                 }
-                processSpeechCandidates(candidates)
+                processCandidates(candidates)
             },
             onState = { face = it },
             createRecognizer = createRecognizer
         )
 
-        Text("Tasks", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-            items(tasks, key = { it.id }) { task ->
-                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF17171D))) {
-                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = task.done,
-                            onCheckedChange = { checked ->
-                                tasks = tasks.map { if (it.id == task.id) it.copy(done = checked) else it }
-                            }
-                        )
-                        Text(
-                            task.title,
-                            modifier = Modifier.weight(1f),
-                            color = if (task.done) Color(0xFF777783) else Color.White
-                        )
+        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF17171D))) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("3. Tasks", fontWeight = FontWeight.SemiBold)
+                if (tasks.isEmpty()) {
+                    Text("Kono task nai.", color = Color(0xFFB8B8C4))
+                } else {
+                    tasks.forEach { task ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = task.done,
+                                onCheckedChange = { checked ->
+                                    tasks = tasks.map { if (it.id == task.id) it.copy(done = checked) else it }
+                                    taskStore.save(tasks)
+                                }
+                            )
+                            Text(
+                                task.title,
+                                modifier = Modifier.weight(1f),
+                                color = if (task.done) Color(0xFF777783) else Color.White
+                            )
+                        }
                     }
                 }
             }
         }
+
+        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF17171D))) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("4. Watch Lab — face compatibility", fontWeight = FontWeight.SemiBold)
+                Text(bleStatus, color = Color(0xFFB8B8C4))
+                Button(
+                    onClick = {
+                        inspection = null
+                        bleStatus = "Scanning BLE devices..."
+                        ble.scan(
+                            onUpdate = {
+                                bleDevices = it
+                                bleStatus = "Found ${it.size} BLE device(s). Watch 7 / watch-like device select koro."
+                            },
+                            onError = { bleStatus = it }
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Scan Watch BLE") }
+
+                bleDevices.take(12).forEach { row ->
+                    OutlinedButton(
+                        onClick = {
+                            bleStatus = "Inspecting ${row.name}..."
+                            ble.inspect(
+                                row,
+                                onResult = {
+                                    inspection = it
+                                    bleStatus = it.note
+                                },
+                                onError = { bleStatus = it }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("${row.name} • ${row.address}")
+                    }
+                }
+
+                inspection?.let { info ->
+                    Text("Connected: ${info.device.name}", fontWeight = FontWeight.Medium)
+                    Text("Services (${info.services.size})", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB8B8C4))
+                    info.services.take(18).forEach {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = Color(0xFF8E8E99))
+                    }
+                    Text(
+                        "Ei scan RCSP/Jieli protocol identify korar data. Compatible hole direct face push enable kora jabe.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFB8B8C4)
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(30.dp))
     }
 }
 
@@ -367,9 +349,7 @@ fun PushToTalkButton(
 
     Button(
         onClick = {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                return@Button
-            }
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return@Button
             if (!listening) {
                 val sr = createRecognizer()
                 recognizer = sr
@@ -388,14 +368,13 @@ fun PushToTalkButton(
                     }
                     override fun onResults(results: Bundle?) {
                         listening = false
-                        val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
-                        onResult(list)
+                        onResult(results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty())
                     }
                     override fun onPartialResults(partialResults: Bundle?) {}
                     override fun onEvent(eventType: Int, params: Bundle?) {}
                 })
 
-                val intent = android.content.Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-BD")
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
@@ -412,7 +391,7 @@ fun PushToTalkButton(
         modifier = Modifier.fillMaxWidth().height(56.dp),
         shape = RoundedCornerShape(18.dp)
     ) {
-        Text(if (listening) "Stop & Process" else "Talk to Companion")
+        Text(if (listening) "Stop & Process" else "Talk to Momo")
     }
 }
 
@@ -434,18 +413,8 @@ fun CompanionFace(state: FaceState, modifier: Modifier = Modifier) {
         val eyeH = size.height * 0.20f * openness
         val y = size.height * 0.42f
 
-        drawRoundRect(
-            Color(0xFF9DE7FF),
-            Offset(size.width * 0.20f, y),
-            Size(eyeW, eyeH),
-            cornerRadius = CornerRadius(eyeH / 2, eyeH / 2)
-        )
-        drawRoundRect(
-            Color(0xFF9DE7FF),
-            Offset(size.width * 0.58f, y),
-            Size(eyeW, if (state == FaceState.CONFUSED) eyeH * 0.55f else eyeH),
-            cornerRadius = CornerRadius(eyeH / 2, eyeH / 2)
-        )
+        drawRoundRect(Color(0xFF9DE7FF), Offset(size.width * 0.20f, y), Size(eyeW, eyeH), cornerRadius = CornerRadius(eyeH / 2, eyeH / 2))
+        drawRoundRect(Color(0xFF9DE7FF), Offset(size.width * 0.58f, y), Size(eyeW, if (state == FaceState.CONFUSED) eyeH * 0.55f else eyeH), cornerRadius = CornerRadius(eyeH / 2, eyeH / 2))
         if (state == FaceState.HAPPY) {
             drawArc(
                 Color(0xFF9DE7FF),
