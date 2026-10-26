@@ -7,30 +7,33 @@ import org.json.JSONObject
 data class TaskItem(val id: Long, val title: String, val done: Boolean = false)
 
 class TaskStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences("watch_companion_tasks", Context.MODE_PRIVATE)
+    private val prefs = context.applicationContext.getSharedPreferences(
+        "watch_companion_tasks", Context.MODE_PRIVATE
+    )
 
     fun load(): List<TaskItem> {
-        val raw = prefs.getString("tasks", "[]") ?: "[]"
+        val json = prefs.getString("tasks", "[]") ?: "[]"
         return runCatching {
-            val arr = JSONArray(raw)
+            val arr = JSONArray(json)
             buildList {
                 for (i in 0 until arr.length()) {
-                    val o = arr.getJSONObject(i)
-                    add(TaskItem(o.getLong("id"), o.getString("title"), o.optBoolean("done", false)))
+                    val item = arr.getJSONObject(i)
+                    add(TaskItem(item.getLong("id"), item.getString("title"), item.optBoolean("done")))
                 }
             }
         }.getOrDefault(emptyList())
     }
 
-    fun save(tasks: List<TaskItem>) {
-        val arr = JSONArray()
-        tasks.forEach {
-            arr.put(JSONObject().apply {
-                put("id", it.id)
-                put("title", it.title)
-                put("done", it.done)
+    // Synchronous persistence: don't tell the user a task was saved until it was.
+    fun save(tasks: List<TaskItem>): Boolean {
+        val json = JSONArray()
+        tasks.forEach { task ->
+            json.put(JSONObject().apply {
+                put("id", task.id)
+                put("title", task.title)
+                put("done", task.done)
             })
         }
-        prefs.edit().putString("tasks", arr.toString()).apply()
+        return prefs.edit().putString("tasks", json.toString()).commit()
     }
 }
