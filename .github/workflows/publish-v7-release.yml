@@ -1,0 +1,42 @@
+name: Publish Momo V7 Direct Watch APK
+
+on:
+  push:
+    branches: [ feature/momo-v7-direct-watch ]
+    paths:
+      - ".github/workflows/publish-v7-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get verified direct-watch APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          gh run download 40376912925 --repo "${{ github.repository }}" --name WatchCompanion-debug-apk --dir release
+          test -s release/app-debug.apk
+          mv release/app-debug.apk release/Momo-V7-Direct-Watch.apk
+          file release/Momo-V7-Direct-Watch.apk
+          sha256sum release/Momo-V7-Direct-Watch.apk
+
+      - name: Publish direct public APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v7.0.0-direct-watch-preview release/Momo-V7-Direct-Watch.apk \
+            --repo "${{ github.repository }}" \
+            --target "11edac2cd4672ec7f5c515ebe8eb198ef10ca8da" \
+            --title "Momo V7 - Direct Watch 7 Connection (No MActivePro)" \
+            --notes "V7 Android APK preview: one-screen Momo; direct Watch 7 BLE pairing/scan and battery/manufacturer/firmware read; Watch call communication audio; no-key phone-side Qwen3 0.6B; English task assistant. The official MActivePro app is not used. No firmware flash or unverified vendor writes. IMPORTANT: On-watch face upload and fully standalone AI have NOT been implemented because proprietary firmware capabilities are unverified. GitHub Android build passed; Pixel 7 / real watch testing remains." \
+            --prerelease

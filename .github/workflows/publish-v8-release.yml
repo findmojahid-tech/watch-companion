@@ -1,0 +1,42 @@
+name: Publish Momo V8 Watch Mic APK
+
+on:
+  push:
+    branches: [ feature/momo-v8-watch-mic-route ]
+    paths:
+      - ".github/workflows/publish-v8-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download already verified V8 APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          gh run download 40381091014 --repo "${{ github.repository }}" --name WatchCompanion-debug-apk --dir release
+          test -s release/app-debug.apk
+          mv release/app-debug.apk release/Momo-V8-Watch-Mic.apk
+          file release/Momo-V8-Watch-Mic.apk
+          sha256sum release/Momo-V8-Watch-Mic.apk
+
+      - name: Publish direct Android APK download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v8.0.0-watch-mic-preview release/Momo-V8-Watch-Mic.apk \
+            --repo "${{ github.repository }}" \
+            --target "f3a5addd1c4ac5cfdcb14add1194d711243c6047" \
+            --title "Momo V8 — Watch 7 microphone routing test" \
+            --notes "One-tap 3-second microphone diagnostic identifies the actual Android AudioRecord input (watch Bluetooth microphone, phone microphone, or unknown). Does not record to disk or upload audio. Includes V7's MActivePro-free direct BLE connection, Watch call speaker, local offline AI and opt-in wake mode. No vendor BLE writes, root, firmware updates or system changes. Installs beside V7 to protect its local data. Successful APK compile is verified; watch mic source still requires Pixel 7 physical testing." \
+            --prerelease
