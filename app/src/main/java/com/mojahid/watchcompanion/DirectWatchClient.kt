@@ -120,7 +120,7 @@ class DirectWatchClient(private val context: Context) {
         session++
         val current = session
         closeLink()
-        val device = runCatching { adapter.getRemoteDevice(row.address) }.getOrNull()
+        val device = runCatching { adapter?.getRemoteDevice(row.address) }.getOrNull()
         if (device == null) {
             emit(DirectWatchStatus(
                 state = "Invalid watch",
@@ -141,7 +141,6 @@ class DirectWatchClient(private val context: Context) {
                     if (current != session) return@post
                     if (status == BluetoothGatt.GATT_SUCCESS &&
                         newState == BluetoothProfile.STATE_CONNECTED) {
-                        cancelTimeout()
                         connected = true
                         emit(mutable.value.copy(
                             state = "Reading watch...", isConnecting = true,
@@ -169,6 +168,7 @@ class DirectWatchClient(private val context: Context) {
                         fail(current, "Could not discover services (code " + status + ").")
                         return@post
                     }
+                    cancelTimeout()
                     val manufacturerUuid = UUID.fromString("00002a29-0000-1000-8000-00805f9b34fb")
                     val firmwareUuid = UUID.fromString("00002a26-0000-1000-8000-00805f9b34fb")
                     val hardwareUuid = UUID.fromString("00002a27-0000-1000-8000-00805f9b34fb")
