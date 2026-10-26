@@ -141,3 +141,22 @@ Do not assume that advertised SDK coverage includes this older W17 Pro
 revision. An unrelated MActivePro/NJJ watch report uses FF02/FF03 under
 `000001ff`, which **does not match these actual Watch 7 services**:
 https://github.com/pedrohsipriano/hub-saude
+
+### Important Goodix DFU mismatch (confirmed against Goodix GR551x DFU Note Rev 1.8)
+
+The actual W17 Pro 4.21 properties differ from the published reference:
+
+| Characteristic | Goodix GR551x Rev 1.8 | This physical Watch 7 |
+|---|---|---|
+| `a6ed0402` | Write Without Response (OTA RX) | **NOTIFY** |
+| `a6ed0403` | Notify/Indicate (OTA TX) | **WRITE_NO_RESPONSE** |
+| `a6ed0404` | Write Without Response/Indicate (OTA Control) | **WRITE_NO_RESPONSE** |
+
+Official spec: https://www.goodix.com/en/docview/GR551x%20DFU%20Application%20Note?objectId=62&objectType=document&version=171 (section 4.2.1, Table 4-1).
+
+So even though the **service UUID matches**, its actual properties do **not**
+match the specific GR551x reference arrangement. The characteristic IDs
+alone do not authorize using a generic Goodix DFU tool or packets; the
+firmware may use another revision/variant of the OTA profile. Treat these
+as **OTA-associated unknown writers**, not confirmed dial commands. Keep
+all writes disabled.
