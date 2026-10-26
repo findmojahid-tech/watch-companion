@@ -740,6 +740,67 @@ fun MomoHome(
         }
 
         MomoPanel {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CompanionFace(FaceState.IDLE, Modifier.size(90.dp))
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Momo face on Watch 7", color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium)
+                    MomoNote("Custom watch-face transfer: NOT VERIFIED")
+                }
+            }
+            MomoNote("This watch's display runs proprietary firmware. " +
+                "Momo can connect by BLE, but the firmware 4.21 face-upload " +
+                "packet format is still unknown. Exporting a PNG does NOT " +
+                "change the watch screen.")
+            Button(
+                onClick = {
+                    dialInfo = if (MomoFaceExport.saveToGallery(context)) {
+                        "Momo image generated at Pictures/Momo (320 x 390 PNG). " +
+                            "NOT uploaded to the watch."
+                    } else {
+                        "Unable to create the Momo image."
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Prepare Momo watch-face image") }
+
+            if (watch.isConnected) {
+                MomoNote("Connected watch firmware: " +
+                    watch.firmware.ifBlank { "unknown" } +
+                    " / hardware: " + watch.hardware.ifBlank { "unknown" })
+                MomoNote("Discovered " + watch.vendorServices.size +
+                    " vendor BLE services, " + watch.vendorCharacteristics.size +
+                    " proprietary characteristics.")
+                OutlinedButton(onClick = {
+                    val report = buildString {
+                        append("Watch: ").append(watch.deviceName)
+                        append("\nFirmware: ").append(watch.firmware)
+                        append("\nHardware: ").append(watch.hardware)
+                        append("\nVendor services:\n")
+                        append(watch.vendorServices.joinToString("\n"))
+                        append("\nCharacteristic properties:\n")
+                        append(watch.vendorCharacteristics.joinToString("\n"))
+                        append("\nNotes: Read-only. No dial upload attempted.")
+                    }
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Momo dial protocol", report))
+                    dialInfo = "Read-only watchface compatibility report copied. " +
+                        "It contains no AI key and no microphone audio."
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Copy watch-face protocol report")
+                }
+            } else {
+                MomoNote("Connect Watch 7 above to inspect its dial communication capabilities.")
+            }
+            if (dialInfo.isNotBlank()) MomoNote(dialInfo)
+            MomoNote("For safety, this build will not send unknown firmware-update " +
+                "or vendor write commands to either watch or phone.")
+        }
+
+        MomoPanel {
             Text("Ask in English", color = Color.White,
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             OutlinedTextField(
@@ -795,18 +856,6 @@ fun MomoHome(
             if (showAdvanced) {
                 MomoNote("Read-only watch tools. No vendor application, firmware flashing, " +
                     "root, bootloader, unknown Bluetooth writes or phone system changes.")
-                Text("Watch face: direct transfer pending protocol verification",
-                    color = Color.White, fontWeight = FontWeight.SemiBold)
-                MomoNote("Your Watch 7 exposes custom 6E40 services and a Goodix OTA channel. " +
-                    "A safe dial-upload format has NOT been identified. No file will be " +
-                    "sent to the watch until its exact protocol is confirmed.")
-                OutlinedButton(onClick = {
-                    dialInfo = if (MomoFaceExport.saveToGallery(context)) {
-                        "Momo PNG generated locally in Pictures/Momo. " +
-                            "It has not been transferred to the watch."
-                    } else "Could not create the PNG."
-                }, modifier = Modifier.fillMaxWidth()) { Text("Generate Momo face PNG") }
-                if (dialInfo.isNotBlank()) MomoNote(dialInfo)
                 OutlinedButton(onClick = {
                     bleResult = null
                     bleList = emptyList()
