@@ -19,6 +19,22 @@ object Watch7PassiveProbe {
     val notifyCharacteristics: List<String> = readCharacteristics +
         listOf("b", "c", "d").map { "6e40000${it}$SUFFIX" }
 
+    /**
+     * ONE speculative read-only product-ID query from NJJ's older MActivePro
+     * family. Those devices use different FF02/FF03 UUIDs; this packet has
+     * NOT been validated for Watch 7 and the owner accepts WATCH-side risk.
+     * The query contains no resource, memory address or firmware bytes.
+     */
+    val speculativeProductIdQuery: ByteArray
+        get() = byteArrayOf(0xBC.toByte(), 0x3C, 0x01, 0x01, 0x00, 0x00)
+
+    /** Two and only two experimental non-OTA write-capable endpoints. */
+    fun canProbe(service: String, characteristic: String, flags: Int): Boolean =
+        service.equals(VENDOR_SERVICE, ignoreCase = true) &&
+            characteristic.lowercase() in
+                listOf("6e40000b$SUFFIX", "6e40000c$SUFFIX") &&
+            flags and 0x08 != 0 // PROPERTY_WRITE; require GATT response
+
     fun canRead(service: String, characteristic: String, flags: Int): Boolean =
         service.equals(READ_SERVICE, ignoreCase = true) &&
             characteristic.lowercase() in readCharacteristics &&
