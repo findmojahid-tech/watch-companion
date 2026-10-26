@@ -1,0 +1,53 @@
+name: Publish Momo V9 Watch Speech APK
+
+on:
+  push:
+    branches: [ feature/momo-v9-watch-speech ]
+    paths:
+      - ".github/workflows/publish-v9-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify source build and download APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            RESULT=$(gh run view 40383725239 --repo "${{ github.repository }}" --json conclusion -q .conclusion)
+            if [ "$RESULT" = "success" ]; then break; fi
+            if [ "$RESULT" = "failure" ] || [ "$RESULT" = "cancelled" ]; then
+              echo "Android build failed. No APK will be released."
+              exit 1
+            fi
+            sleep 10
+          done
+          test "$RESULT" = "success"
+          mkdir -p release
+          gh run download 40383725239 --repo "${{ github.repository }}" --name WatchCompanion-debug-apk --dir release
+          test -s release/app-debug.apk
+          mv release/app-debug.apk release/Momo-V9-Watch-Speech.apk
+          file release/Momo-V9-Watch-Speech.apk
+          sha256sum release/Momo-V9-Watch-Speech.apk
+
+      - name: Publish direct APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v9.0.0-watch-speech-preview release/Momo-V9-Watch-Speech.apk \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Momo V9 — Watch Mic to English Speech" \
+            --notes "W17 Pro Watch 7: a user-initiated 9-second Watch call microphone English speech test. Routes AudioRecord PCM over Android 13+ EXTRA_AUDIO_SOURCE to SpeechRecognizer, checks the actual Bluetooth input, shows the transcript, and sends recognized commands/questions to local tasks or optional phone-side AI with watch-speaker reply. No MActivePro and no firmware writes. Audio is not saved by this app, though Android speech services may process it remotely or ignore injected audio. Actual watch microphone STT and always-on wake behavior need physical testing. Installs beside V8." \
+            --prerelease

@@ -1,0 +1,42 @@
+name: Publish Momo V6 APK
+
+on:
+  push:
+    branches: [ feature/momo-v6-one-app-offline ]
+    paths:
+      - ".github/workflows/publish-v6-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download already verified V6 build artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          gh run download 40374106630 --repo "${{ github.repository }}" --name WatchCompanion-debug-apk --dir release
+          test -s release/app-debug.apk
+          mv release/app-debug.apk release/Momo-V6-Offline-Watch.apk
+          file release/Momo-V6-Offline-Watch.apk
+          sha256sum release/Momo-V6-Offline-Watch.apk
+
+      - name: Publish public direct APK link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v6.0.0-offline-preview release/Momo-V6-Offline-Watch.apk \
+            --repo "${{ github.repository }}" \
+            --target "3d6cfd5dd8cc1348c12ccbeca3323f2ba95f6a11" \
+            --title "Momo V6 - One Screen + Key-Free Offline AI" \
+            --notes "Preview: Android 15 portrait-safe one-screen UI; optional Qwen3 0.6B on-device AI model (one-time ~347 MB download); simplified English Momo wake listening; Watch call audio; safe read-only BLE diagnostics and MActivePro photo-face handoff. No firmware modifications. This APK installs beside V5. Build compilation passed; watch/audio/offline-model performance must be tested on a real Pixel 7. Android SpeechRecognizer is best-effort for continuous wake listening." \
+            --prerelease
