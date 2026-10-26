@@ -449,9 +449,10 @@ fun MomoHome(
                 (pairedWatches + bleList)
                     .distinctBy { it.address }
                     .filter {
-                        it.name.contains("watch", true) ||
+                        (it.name.contains("watch", true) ||
                             it.name.contains("W17", true) ||
-                            it.name.contains("paired", true)
+                            it.name.contains("paired", true)) &&
+                            !it.name.contains("Watch call", true)
                     }
                     .take(10).forEach { row ->
                         OutlinedButton(
