@@ -894,8 +894,9 @@ fun MomoHome(
                 }
             }
             if (dialInfo.isNotBlank()) MomoNote(dialInfo)
-            MomoNote("For safety, this build will not send unknown firmware-update " +
-                "or vendor write commands to either watch or phone.")
+            MomoNote("Goodix OTA, firmware flashing and arbitrary vendor commands " +
+                "remain blocked. Only one optional six-byte watch identification " +
+                "query can be sent with explicit watch-risk consent.")
         }
 
         MomoPanel {
