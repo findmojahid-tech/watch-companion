@@ -838,6 +838,15 @@ fun MomoHome(
             }
             val queryEvidence = Watch7PacketAnalysis.evaluate(watchProbe.events)
             if (watchProbe.running) {
+                OutlinedButton(
+                    onClick = { directWatch.markWatchFaceChange() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Mark: changing face on physical watch")
+                }
+                MomoNote("Tap Mark immediately before switching the face on the watch. " +
+                    "Momo records a timestamp only, so later notifications can " +
+                    "be compared with that action. No command is sent.")
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
                         checked = watchProbeAccepted,
