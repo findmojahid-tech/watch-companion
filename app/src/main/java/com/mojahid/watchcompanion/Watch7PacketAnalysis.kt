@@ -42,6 +42,41 @@ object Watch7PacketAnalysis {
         return fragments.takeIf { it.isNotEmpty() }?.joinToString("; ")
     }
 
+    data class FaceChangeEvidence(
+        val markerRecorded: Boolean,
+        val notificationsAfterMarker: Int,
+        val characteristicsAfterMarker: List<String>,
+        val explanation: String
+    )
+
+    /**
+     * Groups only events AFTER the local tap marker. Correlation is temporal;
+     * a changed packet does NOT imply watch-face protocol support.
+     */
+    fun evaluateFaceChange(events: List<String>): FaceChangeEvidence {
+        val index = events.indexOfLast {
+            it.contains("MARK: user is changing the physical WATCH face now")
+        }
+        if (index == -1) {
+            return FaceChangeEvidence(false, 0, emptyList(),
+                "No physical watch-face action was marked.")
+        }
+        val uuidPrefix = Regex("""NOTIFY (6e40000[5-9bcd])""")
+        val channels = events.drop(index + 1).mapNotNull { event ->
+            uuidPrefix.find(event)?.groupValues?.getOrNull(1)
+        }
+        val found = channels.distinct()
+        return FaceChangeEvidence(true, channels.size, found,
+            if (channels.isEmpty()) {
+                "No notifications followed the face-change marker. This does not " +
+                    "prove that the watch lacks a local face setting."
+            } else {
+                channels.size.toString() + " notification(s) followed the marker on " +
+                    found.joinToString(", ") + ". Timing alone does NOT prove " +
+                    "those messages encode a watch-face change."
+            })
+    }
+
     data class QueryEvidence(
         val queryRecorded: Boolean,
         val gattWriteAccepted: Boolean,
