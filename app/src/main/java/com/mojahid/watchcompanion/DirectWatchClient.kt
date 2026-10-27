@@ -16,6 +16,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import java.util.ArrayDeque
 import java.util.Locale
@@ -84,6 +85,7 @@ class DirectWatchClient(private val context: Context) {
     private var probeTimer: Runnable? = null
     private var probeRunning = false
     private var probeIdSent = false
+    private var probeStartedAtMs = 0L
     private var probePendingWriteUuid: UUID? = null
 
     private fun hasPermission(): Boolean =
@@ -157,8 +159,12 @@ class DirectWatchClient(private val context: Context) {
 
     private fun addProbeEvent(text: String, packet: Boolean = false) {
         val previous = captureMutable.value
+        val elapsed = if (probeStartedAtMs > 0L)
+            "[+" + (SystemClock.elapsedRealtime() - probeStartedAtMs).coerceAtLeast(0L) + "ms] "
+        else ""
         captureMutable.value = previous.copy(
-            events = (previous.events + text.take(260)).takeLast(Watch7PassiveProbe.MAX_EVENTS),
+            events = (previous.events + (elapsed + text).take(280))
+                .takeLast(Watch7PassiveProbe.MAX_EVENTS),
             receivedPackets = previous.receivedPackets + if (packet) 1 else 0
         )
     }
@@ -216,6 +222,7 @@ class DirectWatchClient(private val context: Context) {
         }
 
         probeRunning = true
+        probeStartedAtMs = SystemClock.elapsedRealtime()
         probeIdSent = false
         probePendingWriteUuid = null
         probeReadUuid = null
@@ -366,7 +373,11 @@ class DirectWatchClient(private val context: Context) {
         probeRunning = false
         probeTimer?.let(handler::removeCallbacks)
         probeTimer = null
-        captureMutable.value = captureMutable.value.copy(running = false, status = message)
+        val query = Watch7PacketAnalysis.evaluate(captureMutable.value.events)
+        captureMutable.value = captureMutable.value.copy(
+            running = false,
+            status = message + if (query.queryRecorded) " " + query.explanation else ""
+        )
         session++ // Discard all late GATT callbacks from the lab link.
         closeLink() // Disconnect clears temporary CCCD subscriptions on the watch.
         emit(mutable.value.copy(
@@ -409,6 +420,7 @@ class DirectWatchClient(private val context: Context) {
         probeDescriptorUuid = null
         probePendingWriteUuid = null
         probeIdSent = false
+        probeStartedAtMs = 0L
         standardReadPending = false
         readQueue.clear()
         connected = false
@@ -652,6 +664,13 @@ class DirectWatchClient(private val context: Context) {
                             "READ", characteristic.uuid.toString(), data
                         )
                     )
+                    Watch7PacketAnalysis.explainRead(
+                        characteristic.uuid.toString(), data
+                    )?.let { candidate ->
+                        addProbeEvent("DECODE " +
+                            characteristic.uuid.toString().substring(0, 8) +
+                            " " + candidate + " [unverified]")
+                    }
                 } else {
                     addProbeEvent("READ " +
                         characteristic.uuid.toString().substring(0, 8) +
