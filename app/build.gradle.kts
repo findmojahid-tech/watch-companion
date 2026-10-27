@@ -45,7 +45,7 @@ android {
     buildTypes {
         getByName("debug") {
             // A development build always installs beside the eventual signed release.
-            applicationIdSuffix = ".dev"
+            applicationIdSuffix = ".watchtalklab"
         }
         getByName("release") {
             // Never sign production with a disposable GitHub runner debug certificate.
