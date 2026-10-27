@@ -82,7 +82,8 @@ object Watch7PacketAnalysis {
         val gattWriteAccepted: Boolean,
         val postQueryNotifications: Int,
         val postQueryCommandGroupNotifications: Int,
-        val explanation: String
+        val explanation: String,
+        val jieliFeatureReply: Boolean = false
     )
 
     /**
@@ -104,7 +105,11 @@ object Watch7PacketAnalysis {
                 it.contains("NOTIFY 6e40000d")
         }
         val accepted = after.any { it.contains("ID query GATT accepted") }
+        val jieliReply = after.any { it.contains("JIELI RCSP feature reply frame") }
         val explanation = when {
+            jieliReply ->
+                "Valid JieLi GET_TARGET_FEATURE reply frame received after query. " +
+                    "This supports RCSP transport only; watchface compatibility is NOT proven."
             commandGroup > 0 ->
                 "Found " + commandGroup + " command-group notification(s) after ID query. " +
                     "These are possible replies, NOT decoded/verified acknowledgements."
@@ -117,6 +122,7 @@ object Watch7PacketAnalysis {
             else ->
                 "No confirmed GATT write acknowledgement or watch reply to the ID query."
         }
-        return QueryEvidence(true, accepted, notifications.size, commandGroup, explanation)
+        return QueryEvidence(true, accepted, notifications.size, commandGroup,
+            explanation, jieliFeatureReply = jieliReply)
     }
 }
