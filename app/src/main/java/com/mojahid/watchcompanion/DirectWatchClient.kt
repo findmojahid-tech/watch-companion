@@ -299,6 +299,16 @@ class DirectWatchClient(private val context: Context) {
         )
     }
 
+    /** Phone-side timestamp marker only. Makes a real watch action correlatable. */
+    fun markWatchFaceChange() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post { markWatchFaceChange() }
+            return
+        }
+        if (!probeRunning) return
+        addProbeEvent("MARK: user is changing the physical WATCH face now")
+    }
+
     /**
      * ONE explicit watch-only experiment per capture. The fixed six-byte
      * request is an NJJ product-ID QUERY from a DIFFERENT watch family, so a
