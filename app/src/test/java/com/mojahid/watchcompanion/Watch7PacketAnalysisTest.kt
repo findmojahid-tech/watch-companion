@@ -72,4 +72,24 @@ class Watch7PacketAnalysisTest {
         assertFalse(result.queryRecorded)
         assertFalse(result.gattWriteAccepted)
     }
+    @Test fun notificationBeforeFaceChangeMarkerIsIgnoredForCorrelation() {
+        val result = Watch7PacketAnalysis.evaluateFaceChange(listOf(
+            "[+50ms] NOTIFY 6e400007 (12 B): 01 03",
+            "[+100ms] MARK: user is changing the physical WATCH face now",
+            "[+140ms] NOTIFY 6e400009 (20 B): 00 00",
+            "[+160ms] NOTIFY 6e400009 (20 B): 01 00"
+        ))
+        assertTrue(result.markerRecorded)
+        assertEquals(2, result.notificationsAfterMarker)
+        assertEquals(listOf("6e400009"), result.characteristicsAfterMarker)
+        assertTrue(result.explanation.contains("does NOT prove"))
+    }
+
+    @Test fun absentFaceMarkerDoesNotClaimFaceChangeEvidence() {
+        val result = Watch7PacketAnalysis.evaluateFaceChange(
+            listOf("NOTIFY 6e400007 (12 B): 01 03"))
+        assertFalse(result.markerRecorded)
+        assertEquals(0, result.notificationsAfterMarker)
+    }
+
 }
