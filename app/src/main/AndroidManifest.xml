@@ -19,7 +19,7 @@
     <application
         android:allowBackup="true"
         android:usesCleartextTraffic="false"
-        android:label="Momo V10"
+        android:label="Momo Watch Talk Lab"
         android:theme="@style/Theme.WatchCompanion">
         <activity
             android:name=".MainActivity"
