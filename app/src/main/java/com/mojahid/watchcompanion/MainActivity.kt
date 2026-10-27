@@ -101,7 +101,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     private fun speak(message: String) {
         if (::tts.isInitialized) tts.speak(
-            message.take(550), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString()
+            message.take(1600), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString()
         )
     }
 

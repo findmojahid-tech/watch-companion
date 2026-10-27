@@ -50,6 +50,8 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     private val prefs by lazy { getSharedPreferences("momo_runtime", Context.MODE_PRIVATE) }
 
     private var recognizer: SpeechRecognizer? = null
+    private var watchBridge: WatchSpeechBridge? = null
+    private var watchListening = false
     private lateinit var tts: TextToSpeech
     private lateinit var audio: AudioManager
     private var speechReady = false
@@ -94,6 +96,9 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         handler.removeCallbacksAndMessages(null)
         worker.cancel()
         releaseRecognizer()
+        watchBridge?.cancel()
+        watchBridge = null
+        watchListening = false
         tts.stop()
         tts.shutdown()
         runCatching { audio.clearCommunicationDevice() }
@@ -153,7 +158,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             scheduleListening(1100)
             return
         }
-        tts.speak(text.take(550), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+        tts.speak(text.take(1600), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
     }
 
     private fun releaseRecognizer() {
@@ -167,11 +172,60 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun beginListening() {
-        if (busy || recognizer != null) return
+        if (busy || recognizer != null || watchListening) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
             PackageManager.PERMISSION_GRANTED) return
         if (!SpeechRecognizer.isRecognitionAvailable(this)) return
 
+        // Watch call HFP audio and BLE data are separate connections. If the
+        // owner chose Watch call, use their Watch mic for wake recognition.
+        // Never silently switch to the Pixel mic when the watch route is lost.
+        val preferredName = prefs.getString("preferred_audio_name", null)
+        if (!preferredName.isNullOrBlank()) {
+            val chosen = runCatching { audio.communicationDevice }.getOrNull()
+            val watchReady = chosen?.productName?.toString() == preferredName &&
+                (chosen.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    chosen.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+            if (!watchReady) {
+                prefs.edit().putString(
+                    "wake_last_status",
+                    "Watch call disconnected. Reconnect the watch audio in Momo."
+                ).apply()
+                routeToPreferredWatch()
+                scheduleListening(5000)
+                return
+            }
+            val locale = prefs.getString("recognition_locale", "en-IN") ?: "en-IN"
+            val bridge = watchBridge ?: WatchSpeechBridge(this, audio).also { watchBridge = it }
+            watchListening = true
+            bridge.start(
+                language = locale,
+                onStatus = { message ->
+                    prefs.edit().putString("wake_last_status", message.take(170)).apply()
+                },
+                onResult = { result ->
+                    watchListening = false
+                    errorsInRow = 0
+                    if (!result.capturedFromWatch) {
+                        prefs.edit().putString("wake_last_status",
+                            "Speech input was not captured on Watch call.").apply()
+                        scheduleListening(1300)
+                    } else {
+                        val candidate = WakePhrase.selectHypothesis(result.hypotheses)
+                        handlePhrase(candidate)
+                    }
+                },
+                onFailure = { message ->
+                    watchListening = false
+                    errorsInRow = (errorsInRow + 1).coerceAtMost(8)
+                    prefs.edit().putString("wake_last_status", message.take(170)).apply()
+                    scheduleListening((1100L + errorsInRow * 650L).coerceAtMost(6500L))
+                }
+            )
+            return
+        }
+
+        // Without an opted-in watch profile, support phone microphone mode.
         val sr = SpeechRecognizer.createSpeechRecognizer(this)
         recognizer = sr
         sr.setRecognitionListener(object : RecognitionListener {
@@ -216,8 +270,9 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                 handled = true
                 releaseRecognizer()
                 errorsInRow = 0
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    ?.firstOrNull()?.trim().orEmpty()
+                val text = WakePhrase.selectHypothesis(
+                    results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                ).trim()
                 handlePhrase(text)
             }
         })
@@ -235,19 +290,6 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun isWake(text: String): Boolean {
-        val lower = text.lowercase(Locale.ROOT)
-        return lower == "momo" || lower.startsWith("momo ") ||
-            lower.startsWith("hey momo") || lower.startsWith("hello momo") ||
-            lower.startsWith("hi momo")
-    }
-
-    private fun stripWake(text: String): String {
-        return text.replace(
-            Regex("""^(?:(?:hey|hello|hi)\s+)?momo[\s,.:!?]*""", RegexOption.IGNORE_CASE),
-            ""
-        ).trim()
-    }
 
     private fun handlePhrase(text: String) {
         if (text.isNotBlank()) {
@@ -257,8 +299,9 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             scheduleListening(800)
             return
         }
-        if (isWake(text)) {
-            val command = stripWake(text)
+        val wake = WakePhrase.parse(text)
+        if (wake.detected) {
+            val command = wake.command
             if (command.isBlank()) {
                 awaitingCommandUntil = SystemClock.elapsedRealtime() + 12000L
                 say("Yes?")

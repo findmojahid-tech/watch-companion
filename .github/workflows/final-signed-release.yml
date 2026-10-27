@@ -1,0 +1,91 @@
+name: Release signed Momo (manual approval only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      physical_watch_accepted:
+        description: "Confirm W17 firmware 4.21 watch-face upload, voice, and AI were physically verified"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/integration/momo-final' && inputs.physical_watch_accepted
+    environment: momo-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Ensure production keystore secrets are present
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MOMO_KEYSTORE_BASE64 }}
+          MOMO_SIGNING_STORE_PASSWORD: ${{ secrets.MOMO_SIGNING_STORE_PASSWORD }}
+          MOMO_SIGNING_KEY_ALIAS: ${{ secrets.MOMO_SIGNING_KEY_ALIAS }}
+          MOMO_SIGNING_KEY_PASSWORD: ${{ secrets.MOMO_SIGNING_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64"
+          test -n "$MOMO_SIGNING_STORE_PASSWORD"
+          test -n "$MOMO_SIGNING_KEY_ALIAS"
+          test -n "$MOMO_SIGNING_KEY_PASSWORD"
+          umask 077
+          mkdir -p "$RUNNER_TEMP/momo"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/momo/release.jks"
+          test -s "$RUNNER_TEMP/momo/release.jks"
+
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER=/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Test and build signed final APK
+        env:
+          MOMO_SIGNING_KEYSTORE: ${{ runner.temp }}/momo/release.jks
+          MOMO_SIGNING_STORE_PASSWORD: ${{ secrets.MOMO_SIGNING_STORE_PASSWORD }}
+          MOMO_SIGNING_KEY_ALIAS: ${{ secrets.MOMO_SIGNING_KEY_ALIAS }}
+          MOMO_SIGNING_KEY_PASSWORD: ${{ secrets.MOMO_SIGNING_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:testReleaseUnitTest :app:assembleRelease
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          sha256sum "$APK"
+          mkdir -p final
+          cp "$APK" final/Momo-Final.apk
+
+      - name: Publish ONE signed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 'versionName =' app/build.gradle.kts | cut -d '"' -f2)
+          TAG="momo-final-v$VERSION"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Signed release already exists; no overwrite. Increment version before another release."
+            exit 1
+          fi
+          gh release create "$TAG" final/Momo-Final.apk \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Momo Final $VERSION" \
+            --notes "Production-signed Momo for Watch 7. Installation/update signature is stable. Watch-side custom face and voice must be physically accepted before this release is triggered."

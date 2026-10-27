@@ -69,8 +69,9 @@ fun MomoHome(
     val keys = remember { AiKeyStore(context) }
     val offlineStore = remember { OfflineModelStore(context) }
     val diagnostics = remember { BleDiagnostics(context) }
-    val directWatch = remember { DirectWatchClient(context) }
+    val directWatch = remember { DirectWatchSession.get(context.applicationContext) }
     val watch by directWatch.state.collectAsState()
+    val watchProbe by directWatch.protocolCapture.collectAsState()
     val scope = rememberCoroutineScope()
 
     var model by remember { mutableStateOf(ModelDownloadStatus("Checking offline AI...")) }
@@ -82,6 +83,7 @@ fun MomoHome(
     var isBusy by remember { mutableStateOf(false) }
     var voiceBusy by remember { mutableStateOf(false) }
     var wakeEnabled by remember { mutableStateOf(prefs.getBoolean("wake_running", false)) }
+    var wakeInputStatus by remember { mutableStateOf("") }
     var audioChoices by remember { mutableStateOf<List<AudioDeviceInfo>>(emptyList()) }
     var chosenAudio by remember { mutableStateOf<AudioDeviceInfo?>(null) }
     var audioInfo by remember { mutableStateOf("Connect the Watch call Bluetooth profile.") }
@@ -94,6 +96,8 @@ fun MomoHome(
         mutableStateOf("Speaker confirmed by user. Microphone source still needs testing.")
     }
     var showAdvanced by remember { mutableStateOf(false) }
+    var watchProbeAccepted by remember { mutableStateOf(false) }
+    var watchAutoIdentify by remember { mutableStateOf(false) }
     var showTasks by remember { mutableStateOf(false) }
     var tasks by remember { mutableStateOf(taskEngine.tasks()) }
     var aiKey by remember { mutableStateOf("") }
@@ -119,6 +123,9 @@ fun MomoHome(
             status = "Microphone permission is required to listen for Momo."
         }
         pairedWatches = directWatch.pairedWatches()
+        if (result[Manifest.permission.BLUETOOTH_CONNECT] == true) {
+            directWatch.reconnectIfEnabled()
+        }
     }
 
     fun audioRefresh() {
@@ -144,7 +151,7 @@ fun MomoHome(
         answer = output
         status = output
         face = FaceState.HAPPY
-        say(output.take(550))
+        say(output.take(1600))
     }
 
     fun ask(raw: String) {
@@ -192,6 +199,8 @@ fun MomoHome(
     }
 
     fun startWake() {
+        prefs.edit().remove("wake_last_status").apply()
+        wakeInputStatus = ""
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
             requestPermissions.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
@@ -218,6 +227,105 @@ fun MomoHome(
         status = "Momo is resting. Tap Start Momo when you want to talk."
     }
 
+    /**
+     * One tap: use only a specifically named Watch call endpoint. Do not hijack
+     * Pixel Buds/other headsets; no phone OS setting, root or firmware changes.
+     * This is a per-app communication audio route, not permanent pairing.
+     */
+    fun startWatchVoice() {
+        if (watchSpeechRunning || wakeEnabled || micTestRunning || voiceBusy || isBusy) return
+        if (!watch.isConnected) {
+            watchSpeechStatus = "Connect Watch 7 below before talking through the watch."
+            status = watchSpeechStatus
+            return
+        }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
+            != PackageManager.PERMISSION_GRANTED) {
+            watchSpeechStatus = "Allow Nearby devices to use Watch call."
+            requestPermissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT))
+            return
+        }
+        audioRefresh()
+        val preferred = prefs.getString("preferred_audio_name", null)
+        val chosenId = WatchAudioRouting.choose(
+            audioChoices.map {
+                WatchAudioRouting.Candidate(it.id, it.productName?.toString().orEmpty())
+            },
+            preferred
+        )
+        val device = audioChoices.firstOrNull { it.id == chosenId }
+        if (device == null) {
+            watchSpeechStatus = if (audioChoices.isEmpty()) {
+                "No Watch call audio profile is available. Pair Watch call in Android Bluetooth settings."
+            } else {
+                "Cannot safely auto-pick a watch microphone. Choose your Watch call device below."
+            }
+            status = watchSpeechStatus
+            face = FaceState.CONFUSED
+            return
+        }
+        val routed = runCatching {
+            audio.mode = AudioManager.MODE_IN_COMMUNICATION
+            audio.setCommunicationDevice(device)
+        }.getOrDefault(false)
+        if (!routed) {
+            runCatching { audio.clearCommunicationDevice() }
+            runCatching { audio.mode = AudioManager.MODE_NORMAL }
+            watchSpeechStatus = "Android couldn't route audio to Watch call. Reconnect the watch and retry."
+            status = watchSpeechStatus
+            face = FaceState.CONFUSED
+            return
+        }
+
+        chosenAudio = device
+        val name = device.productName?.toString().orEmpty()
+        prefs.edit().putString("preferred_audio_name", name).apply()
+        audioInfo = name + " selected for Momo speech; use Release watch audio to restore phone."
+        watchSpeechRunning = true
+        face = FaceState.LISTENING
+        status = "Listening for your question on Watch 7..."
+        watchSpeechStatus = "Watch call selected. Speak in English within 9 seconds."
+
+        scope.launch {
+            // HFP/BLE Audio needs a short route-settle period on Pixel 7.
+            delay(650)
+            recognizeWatch(
+                prefs.getString("recognition_locale", "en-IN") ?: "en-IN",
+                { progress -> watchSpeechStatus = progress },
+                { result ->
+                    watchSpeechRunning = false
+                    val spoken = result.hypotheses.firstOrNull().orEmpty()
+                    val route = result.captureRoute
+                    when {
+                        !result.capturedFromWatch -> {
+                            watchSpeechStatus = "Watch microphone route NOT confirmed: " +
+                                route + ". No AI command was sent."
+                            face = FaceState.CONFUSED
+                        }
+                        spoken.isBlank() -> {
+                            watchSpeechStatus = "Watch microphone selected, but no English words recognized."
+                            face = FaceState.CONFUSED
+                        }
+                        else -> {
+                            watchSpeechStatus = "Watch mic AudioRecord route: " + route +
+                                ". Recognition service may still use a different input."
+                            val clean = spoken.replace(
+                                Regex("^(?:(?:hey|hi|hello)\\s+)?momo[\\s,.:!?]*",
+                                    RegexOption.IGNORE_CASE), ""
+                            ).trim().ifBlank { spoken }
+                            ask(clean)
+                        }
+                    }
+                },
+                { error ->
+                    watchSpeechRunning = false
+                    watchSpeechStatus = "Watch microphone: " + error
+                    face = FaceState.CONFUSED
+                }
+            )
+        }
+    }
+
     LaunchedEffect(Unit) {
         val permissions = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
@@ -230,6 +338,7 @@ fun MomoHome(
         requestPermissions.launch(permissions.toTypedArray())
         audioRefresh()
         pairedWatches = directWatch.pairedWatches()
+        directWatch.reconnectIfEnabled()
     }
 
     // Refresh model download and show last recognized wake conversation without requiring
@@ -239,6 +348,7 @@ fun MomoHome(
         while (true) {
             model = offlineStore.status()
             wakeEnabled = prefs.getBoolean("wake_running", false)
+            wakeInputStatus = prefs.getString("wake_last_status", "").orEmpty()
             val wakeReply = prefs.getString("wake_last_answer", "").orEmpty()
             if (wakeReply.isNotBlank() && wakeReply != lastWakeReply) {
                 lastWakeReply = wakeReply
@@ -255,7 +365,7 @@ fun MomoHome(
     DisposableEffect(Unit) {
         onDispose {
             diagnostics.close()
-            directWatch.close()
+            // DirectWatchSession is app-scoped: changing pages does not disconnect watch.
         }
     }
 
@@ -306,11 +416,30 @@ fun MomoHome(
             )
             Button(
                 onClick = { if (wakeEnabled) stopWake() else startWake() },
+                enabled = !watchSpeechRunning && !micTestRunning,
                 modifier = Modifier.fillMaxWidth().height(62.dp),
                 shape = RoundedCornerShape(21.dp)
             ) {
                 Text(if (wakeEnabled) "Stop Momo Listening" else "Start Momo Listening",
                     fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            }
+            Button(
+                onClick = { startWatchVoice() },
+                enabled = !wakeEnabled && !watchSpeechRunning && !micTestRunning &&
+                    !voiceBusy && !isBusy,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(17.dp)
+            ) {
+                Text(
+                    if (watchSpeechRunning) "Listening through Watch 7..."
+                    else "Talk through Watch 7",
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            if (!watch.isConnected) {
+                MomoNote("Connect Watch 7 below to activate the watch microphone.")
+            } else if (watchSpeechStatus.isNotBlank()) {
+                MomoNote(watchSpeechStatus)
             }
             if (!wakeEnabled) {
                 OutlinedButton(
@@ -348,6 +477,9 @@ fun MomoHome(
             )
             if (heard.isNotBlank()) MomoNote("Heard: " + heard)
             if (wakeEnabled) {
+                if (wakeInputStatus.isNotBlank()) {
+                    MomoNote("Watch listening: " + wakeInputStatus)
+                }
                 MomoNote("A visible microphone notification stays on. Android may suspend " +
                     "continuous recognition after locking the phone; this is experimental.")
             }
@@ -650,6 +782,17 @@ fun MomoHome(
                     say("Hello! I am Momo. Can you hear me through your watch?")
                 }, modifier = Modifier.weight(1f)) { Text("Test speaker") }
             }
+            OutlinedButton(
+                onClick = {
+                    runCatching { audio.clearCommunicationDevice() }
+                    runCatching { audio.mode = AudioManager.MODE_NORMAL }
+                    chosenAudio = null
+                    audioInfo = "Watch call released. Phone audio is restored for this app."
+                    watchSpeechStatus = "Watch call audio route released."
+                },
+                enabled = !watchSpeechRunning && !micTestRunning && !wakeEnabled,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Release watch audio · restore phone") }
             MomoNote("A voice response can use Watch call without keeping BLE diagnostics open.")
             HorizontalDivider(color = Color(0xFF344155))
             Text("Watch microphone verification", color = Color.White,
@@ -681,48 +824,7 @@ fun MomoHome(
             MomoNote(micTestStatus)
 
             Button(
-                onClick = {
-                    if (watchSpeechRunning || wakeEnabled || micTestRunning) return@Button
-                    watchSpeechRunning = true
-                    watchSpeechStatus = "Speak into Watch 7 for up to 9 seconds. " +
-                        "Try: What is the capital of Bangladesh?"
-                    val accent = prefs.getString("recognition_locale", "en-IN") ?: "en-IN"
-                    recognizeWatch(
-                        accent,
-                        { progress ->
-                            watchSpeechStatus = progress
-                        },
-                        { result ->
-                            watchSpeechRunning = false
-                            val spoken = result.hypotheses.firstOrNull().orEmpty()
-                            val route = result.captureRoute
-                            if (!result.capturedFromWatch) {
-                                watchSpeechStatus = "Input source not confirmed as watch: " + route +
-                                    ". No AI command sent. Reconnect Watch call and retry."
-                                face = FaceState.CONFUSED
-                            } else if (spoken.isBlank()) {
-                                watchSpeechStatus = "Watch microphone was selected, " +
-                                    "but no English text was recognized. Please retry."
-                                face = FaceState.CONFUSED
-                            } else {
-                                watchSpeechStatus = "Heard through test: " + spoken +
-                                    "\nAudioRecord route: " + route +
-                                    "\nAndroid recognition may ignore injected input " +
-                                    "on some phones. Check that the phone was far away."
-                                val clean = spoken.replace(
-                                    Regex("^(?:(?:hey|hi|hello)\\s+)?momo[\\s,.:!?]*",
-                                        RegexOption.IGNORE_CASE), ""
-                                ).trim().ifBlank { spoken }
-                                ask(clean)
-                            }
-                        },
-                        { error ->
-                            watchSpeechRunning = false
-                            watchSpeechStatus = "Watch speech test: " + error
-                            face = FaceState.CONFUSED
-                        }
-                    )
-                },
+                onClick = { startWatchVoice() },
                 enabled = !wakeEnabled && !watchSpeechRunning && !micTestRunning && !voiceBusy && !isBusy,
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -773,6 +875,11 @@ fun MomoHome(
                 MomoNote("Discovered " + watch.vendorServices.size +
                     " vendor BLE services, " + watch.vendorCharacteristics.size +
                     " proprietary characteristics.")
+                val profile = Watch7GattProfile.assess(
+                    watch.firmware, watch.hardware, watch.vendorServices,
+                    watch.vendorCharacteristics
+                )
+                MomoNote(profile.explanation)
                 OutlinedButton(onClick = {
                     val report = buildString {
                         append("Watch: ").append(watch.deviceName)
@@ -782,6 +889,10 @@ fun MomoHome(
                         append(watch.vendorServices.joinToString("\n"))
                         append("\nCharacteristic properties:\n")
                         append(watch.vendorCharacteristics.joinToString("\n"))
+                        append("\nWatch 7 firmware 4.21 profile match: ")
+                            .append(profile.exactFirmware421Profile)
+                        append("\nVerified watch-face transfer: ")
+                            .append(profile.dialTransferVerified)
                         append("\nNotes: Read-only. No dial upload attempted.")
                     }
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
@@ -795,9 +906,138 @@ fun MomoHome(
             } else {
                 MomoNote("Connect Watch 7 above to inspect its dial communication capabilities.")
             }
+
+            HorizontalDivider(color = Color(0xFF35495C))
+            Text("Watch-only BLE experiment", color = Color.White,
+                fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+            MomoNote("For Watch 7 firmware 4.21 only: read five vendor values " +
+                "and monitor eight notification sources for 30 seconds. " +
+                "Passive mode only changes temporary BLE notification subscriptions. " +
+                "Optional JieLi identification query on 0b OR 0c requires consent. " +
+                "No dial/OTA file or Android phone firmware is written.")
+            if (!watchProbe.running) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = watchAutoIdentify,
+                        onCheckedChange = { watchAutoIdentify = it }
+                    )
+                    Text("One-tap identify: also send ONE experimental JieLi query " +
+                        "to my watch (watch risk accepted; never phone firmware).",
+                        color = MomoSoft, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f))
+                }
+            }
+            OutlinedButton(
+                onClick = {
+                    watchProbeAccepted = false
+                    val auto = watchAutoIdentify
+                    watchAutoIdentify = false // fresh consent next session
+                    directWatch.startPassiveCapture(auto)
+                },
+                enabled = watch.isConnected && !watchProbe.running,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (watchAutoIdentify) "Diagnose Watch 7 and identify JieLi"
+                     else "Capture 30 seconds of watch BLE traffic")
+            }
+            val queryEvidence = Watch7PacketAnalysis.evaluate(watchProbe.events)
+            val faceEvidence = Watch7PacketAnalysis.evaluateFaceChange(watchProbe.events)
+            if (watchProbe.running) {
+                OutlinedButton(
+                    onClick = { directWatch.markWatchFaceChange() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Mark: changing face on physical watch")
+                }
+                MomoNote("Tap Mark immediately before switching the face on the watch. " +
+                    "Momo records a timestamp only, so later notifications can " +
+                    "be compared with that action. No command is sent.")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = watchProbeAccepted,
+                        onCheckedChange = { watchProbeAccepted = it }
+                    )
+                    Text("I accept the risk of ONE unknown watch-side command. " +
+                        "Pixel 7 firmware and settings will not be modified.",
+                        color = MomoSoft, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { directWatch.sendExperimentalJieliFeature("0b") },
+                        enabled = watchProbeAccepted && !queryEvidence.queryRecorded,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("JieLi identify 0b") }
+                    OutlinedButton(
+                        onClick = { directWatch.sendExperimentalJieliFeature("0c") },
+                        enabled = watchProbeAccepted && !queryEvidence.queryRecorded,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("JieLi identify 0c") }
+                }
+                MomoNote("Only one query per capture, on 0b OR 0c. " +
+                    "The 8-byte JieLi RCSP GET_TARGET_FEATURE query is experimental: " +
+                    "AC6954 is listed for some W17 Pros, but this exact firmware " +
+                    "has not been validated. No Goodix OTA or face file is sent.")
+                TextButton(onClick = { directWatch.stopPassiveCapture() },
+                    modifier = Modifier.fillMaxWidth()) {
+                    Text("Stop capture and reconnect watch")
+                }
+            }
+            MomoNote(watchProbe.status)
+            if (queryEvidence.queryRecorded) {
+                MomoNote(queryEvidence.explanation)
+            }
+            if (faceEvidence.markerRecorded) {
+                MomoNote(faceEvidence.explanation)
+            }
+            if (watchProbe.events.isNotEmpty()) {
+                MomoNote("Capture records: " + watchProbe.events.size +
+                    " (notifications: " + watchProbe.receivedPackets + "). " +
+                    "Data remains in memory; no automatic uploads.")
+                Text(
+                    watchProbe.events.takeLast(15).joinToString("\n"),
+                    color = MomoSoft,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedButton(onClick = {
+                    val summary = buildString {
+                        append("MOMO Watch 7 passive BLE capture\n")
+                        append("Firmware 4.21 / hardware 1.0. No OTA, no face upload.\n")
+                        append("Optional owner-approved identification query: ")
+                            .append(queryEvidence.queryRecorded).append("\n")
+                        append("GATT write accepted (not proof of watch response): ")
+                            .append(queryEvidence.gattWriteAccepted).append("\n")
+                        append("Notifications AFTER query: ")
+                            .append(queryEvidence.postQueryNotifications).append("\n")
+                        append("Command-group notifications AFTER query: ")
+                            .append(queryEvidence.postQueryCommandGroupNotifications)
+                            .append("\n")
+                        append("Analysis: ").append(queryEvidence.explanation).append("\n")
+                        append("Physical face-change marker: ")
+                            .append(faceEvidence.markerRecorded).append("\n")
+                        append("Notifications AFTER face marker: ")
+                            .append(faceEvidence.notificationsAfterMarker).append("\n")
+                        append("Face action correlation: ").append(faceEvidence.explanation)
+                            .append("\n")
+                        append("Total notifications: ").append(watchProbe.receivedPackets)
+                        append("\n").append(watchProbe.events.joinToString("\n"))
+                    }
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as ClipboardManager
+                    clipboard.setPrimaryClip(
+                        ClipData.newPlainText("Momo watch protocol evidence", summary)
+                    )
+                    dialInfo = "Watch-only capture copied. Review the hex for " +
+                        "private health/device data before sharing publicly."
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Copy captured BLE observations")
+                }
+            }
             if (dialInfo.isNotBlank()) MomoNote(dialInfo)
-            MomoNote("For safety, this build will not send unknown firmware-update " +
-                "or vendor write commands to either watch or phone.")
+            MomoNote("Goodix OTA, firmware flashing and arbitrary vendor commands " +
+                "remain blocked. Only one optional six-byte watch identification " +
+                "query can be sent with explicit watch-risk consent.")
         }
 
         MomoPanel {

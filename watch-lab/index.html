@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#091321">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'">
+<title>MOMO • Watch 7 Bluetooth Bridge</title><style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#091321;color:#f2f8ff}*{box-sizing:border-box}
+body{margin:0;min-height:100svh;background:radial-gradient(ellipse at 50% 0,#173951,#091321 68%)}
+main{max-width:570px;margin:auto;padding:22px 16px 70px}header{text-align:center;margin:0 0 22px}.kicker{font-size:11px;letter-spacing:.27em;color:#86daed;font-weight:800}
+h1{font-size:31px;letter-spacing:-.04em;margin:9px 0}header p,.sub{color:#abc5d4;font-size:13px;line-height:1.55}
+.panel{background:#122539;border:1px solid #2c455c;border-radius:19px;padding:18px;margin:16px 0}
+h2{font-size:18px;margin:8px 0}.badge{font-size:11px;color:#8ce7c9;letter-spacing:.1em;font-weight:800}
+.actions{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}.actions button{flex:1;min-width:138px}
+button{background:#1c415b;border:1px solid #3c7695;color:#edf9ff;font:inherit;font-size:13px;font-weight:700;min-height:45px;border-radius:12px;padding:10px;cursor:pointer}
+button.main{background:#77def2;border-color:#a2f2ff;color:#092336}button.risk{background:#542e37;border-color:#c2798b}
+button:disabled{opacity:.35;cursor:not-allowed}button:focus-visible{outline:3px solid #fff;outline-offset:2px}
+#status{font-size:13px;border-left:4px solid #6791b5;padding:11px;border-radius:8px;background:#0b1d2f;line-height:1.5}
+#status.ok{border-color:#72d8a4}#status.err{border-color:#f89896}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+.stats div{background:#091c2f;padding:12px 8px;text-align:center;border-radius:12px}
+.stats b{font-size:17px;display:block}.stats small{font-size:10px;color:#9bb6c6}
+pre{background:#071522;border:1px solid #345367;border-radius:12px;padding:13px;font-size:11px;color:#c5eeee;min-height:125px;max-height:290px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}
+.warning{background:#2b1c27;border:1px solid #765260;color:#fbdfe8;border-radius:12px;padding:12px;font-size:12px;line-height:1.5}
+label{display:flex;gap:9px;align-items:flex-start;color:#cbdce7;font-size:12px;line-height:1.45;margin:14px 0}
+input[type=checkbox]{width:19px;height:19px;accent-color:#80e5f1;flex:none}code{color:#a8ebfa}
+footer{text-align:center;font-size:12px;color:#92adbf;line-height:1.5}
+</style></head><body><main><header><div class="kicker">MOMO • DIRECT WATCH CONTROL</div><h1>Watch 7 Bluetooth Bridge</h1><p>Real device connection and protocol capture. Runs in Android Chrome. No APK installation, root or phone firmware changes.</p></header>
+<section class="panel"><div class="badge">01 / CONNECT</div><h2>Connect your physical watch</h2><p class="sub">Open on Pixel 7 in Chrome. Disconnect Watch 7 inside your existing Momo app first, then select <strong>Watch 7</strong> from the Bluetooth picker. This tool rejects a different GATT profile.</p>
+<div class="actions"><button id="connect" class="main">Connect Watch 7</button><button id="disconnect" disabled>Disconnect</button></div><p id="status" role="status" aria-live="polite">Ready. No device connected.</p>
+<div class="stats"><div><b id="firmware">—</b><small>Firmware</small></div><div><b id="hardware">—</b><small>Hardware</small></div><div><b id="match">0 / 11</b><small>UUID matches</small></div></div></section>
+<section class="panel"><div class="badge">02 / CAPTURE</div><h2>Live Bluetooth evidence</h2><p class="sub">Reads 5 known vendor characteristics and listens to 8 notification channels for 30 seconds. Interact with the actual watch during capture. Only temporary standard notification subscriptions are enabled.</p>
+<div class="actions"><button id="capture" class="main" disabled>Capture watch traffic</button><button id="stop" disabled>Stop capture</button></div>
+<div class="stats"><div><b id="reads">0</b><small>Reads</small></div><div><b id="packets">0</b><small>Notifications</small></div><div><b id="remaining">—</b><small>Seconds left</small></div></div>
+<pre id="log">No capture yet.</pre><div class="actions"><button id="copy" disabled>Copy watch report</button><button id="clear">Clear</button></div>
+<p class="sub">Data stays in this browser page's memory; there is no server upload. It may contain private device or health details, so inspect before sharing.</p></section>
+<section class="panel"><div class="badge">03 / EXPERIMENT</div><h2>Optional one-shot watch query</h2><p class="sub">Fixed six-byte identification request <code>BC 3C 01 01 00 00</code>, borrowed from a different Microwear/NJJ device. Unverified on firmware 4.21. At most one write to <code>6e40000b</code> OR <code>6e40000c</code> per capture.</p>
+<div class="warning">Watch-side risk: it may freeze or disconnect. Goodix OTA service <code>a6ed0401</code> is NEVER written to. The Pixel 7 OS and firmware are not modified. This is not a watch-face uploader.</div>
+<label><input id="risk" type="checkbox"><span>I accept the risk to the WATCH for one experimental identification request during this capture.</span></label>
+<div class="actions"><button id="sendb" class="risk" disabled>Send ID on 0b</button><button id="sendc" class="risk" disabled>Send ID on 0c</button></div></section>
+<footer>MOMO Watch Bridge — experimental hardware diagnostics, not a finished animated watchface.</footer></main>
+<script>
+"use strict";
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  var R="6e400004-b5a3-f393-e0a9-e50e24dcca9e",W="6e40000a-b5a3-f393-e0a9-e50e24dcca9e";
+  var O="a6ed0401-d344-460a-8075-b9e8ec90d71b",I="0000180a-0000-1000-8000-00805f9b34fb";
+  var tail="-b5a3-f393-e0a9-e50e24dcca9e";
+  var readIds=["5","6","7","8","9"].map(function(x){return "6e40000"+x+tail;});
+  var notifyIds=readIds.concat(["b","c","d"].map(function(x){return "6e40000"+x+tail;}));
+  var expected=new Map();
+  readIds.forEach(function(id){expected.set(id,{service:R,read:true,notify:true});});
+  ["b","c","d"].forEach(function(x,index){expected.set("6e40000"+x+tail,{service:W,notify:true,write:index<2,writeWithoutResponse:index<2});});
+  expected.set("a6ed0402-d344-460a-8075-b9e8ec90d71b",{service:O,notify:true});
+  ["3","4"].forEach(function(x){expected.set("a6ed040"+x+"-d344-460a-8075-b9e8ec90d71b",{service:O,writeWithoutResponse:true});});
+  var device=null,server=null,verified=false,capturing=false,sent=false;
+  var reads=[],notifications=[],writers=new Map(),logs=[],notificationTotal=0,readTotal=0,clock=null,stopTimer=null;
+  function state(msg,kind){$("status").textContent=msg;$("status").className=kind||"";}
+  function buttons(){
+    var ready=!!device&&!!device.gatt&&device.gatt.connected&&verified;
+    $("connect").disabled=ready;
+    $("disconnect").disabled=!ready;
+    $("capture").disabled=!ready||capturing;
+    $("stop").disabled=!capturing;
+    var query=ready&&capturing&&$("risk").checked&&!sent;
+    $("sendb").disabled=!query;
+    $("sendc").disabled=!query;
+  }
+  function asBytes(data){return data instanceof Uint8Array?data:new Uint8Array(data.buffer,data.byteOffset,data.byteLength);}
+  function hex(data){var a=Array.from(asBytes(data));return a.slice(0,36).map(function(n){return n.toString(16).padStart(2,"0").toUpperCase();}).join(" ")+(a.length>36?" ...":"");}
+  function log(type,id,data){
+    if(logs.length>=48)logs.shift();
+    var b=asBytes(data),msg=new Date().toLocaleTimeString()+" "+type+" "+id.slice(0,8)+" ("+b.length+" bytes): "+hex(b);
+    logs.push(msg);$("log").textContent=logs.join("\n");$("log").scrollTop=$("log").scrollHeight;
+    $("copy").disabled=false;
+  }
+  function disconnect(){if(device&&device.gatt&&device.gatt.connected)device.gatt.disconnect();}
+  function onDisconnected(){
+    clearInterval(clock);clearTimeout(stopTimer);capturing=false;verified=false;sent=false;
+    reads=[];notifications=[];writers.clear();$("risk").checked=false;
+    $("remaining").textContent="—";$("match").textContent="0 / 11";
+    state("Watch disconnected. No phone settings changed.");buttons();
+  }
+  async function validate(){
+    var found=new Map();
+    for(var serviceId of [R,W,O]){
+      var svc=await server.getPrimaryService(serviceId);
+      var cs=await svc.getCharacteristics();
+      cs.forEach(function(ch){found.set(ch.uuid.toLowerCase(),{service:serviceId,ch:ch});});
+    }
+    if(found.size!==11)throw Error("Unexpected GATT profile: "+found.size+" channels, not 11. No data written.");
+    for(var pair of expected){
+      var id=pair[0],e=pair[1],f=found.get(id);
+      if(!f||f.service!==e.service)throw Error("Wrong or missing Watch 7 characteristic "+id.slice(0,8));
+      for(var key of ["read","notify","write","writeWithoutResponse"]){
+        if(Boolean(f.ch.properties[key])!==Boolean(e[key]))throw Error("Unexpected property "+key+" for "+id.slice(0,8));
+      }
+    }
+    $("match").textContent="11 / 11";
+    reads=readIds.map(function(id){return found.get(id).ch;});
+    notifications=notifyIds.map(function(id){return found.get(id).ch;});
+    writers.set("0b",found.get("6e40000b"+tail).ch);
+    writers.set("0c",found.get("6e40000c"+tail).ch);
+    var fw="",hw="";
+    try{
+      var info=await server.getPrimaryService(I);
+      try{fw=new TextDecoder().decode(await (await info.getCharacteristic("00002a26-0000-1000-8000-00805f9b34fb")).readValue()).trim();}catch(e){}
+      try{hw=new TextDecoder().decode(await (await info.getCharacteristic("00002a27-0000-1000-8000-00805f9b34fb")).readValue()).trim();}catch(e){}
+    }catch(e){}
+    $("firmware").textContent=fw||"unknown";$("hardware").textContent=hw||"unknown";
+    if(fw&&fw!=="4.21")throw Error("Different firmware "+fw+"; capture blocked.");
+    if(hw&&hw!=="1.0")throw Error("Different hardware "+hw+"; capture blocked.");
+    verified=true;
+  }
+  async function connect(){
+    if(!navigator.bluetooth||!window.isSecureContext){state("Open this HTTPS page in Chrome on Android; Web Bluetooth is unavailable here.","err");return;}
+    $("connect").disabled=true;state("Choose Watch 7 in the Bluetooth picker...");
+    try{
+      device=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:[R,W,O,I]});
+      if(!/^watch\s*7$/i.test(device.name||""))throw Error("Selected device was not Watch 7.");
+      device.addEventListener("gattserverdisconnected",onDisconnected,{once:true});
+      state("Connecting and checking the real GATT profile...");
+      server=await device.gatt.connect();await validate();
+      $("log").textContent="Watch 7 connected; full 11-characteristic profile verified. Start a capture.";
+      state("Physical Watch 7 connected. Ready for 30-second capture.","ok");
+    }catch(e){disconnect();state("Connection failed: "+(e.message||String(e)),"err");}
+    buttons();
+  }
+  async function finish(msg){
+    if(!capturing)return;
+    capturing=false;clearInterval(clock);clearTimeout(stopTimer);
+    $("remaining").textContent="—";$("risk").checked=false;
+    state(msg+" Disconnecting to clear temporary subscriptions.","ok");buttons();disconnect();
+  }
+  function onNotify(event){
+    if(!capturing)return;
+    var ch=event.target;if(!notifyIds.includes(ch.uuid.toLowerCase()))return;
+    notificationTotal++;$("packets").textContent=String(notificationTotal);log("NOTIFY",ch.uuid,asBytes(ch.value));
+  }
+  async function capture(){
+    if(!verified||capturing)return;
+    capturing=true;sent=false;logs=[];readTotal=0;notificationTotal=0;
+    $("reads").textContent="0";$("packets").textContent="0";$("risk").checked=false;$("log").textContent="Starting watch capture…";
+    buttons();var remaining=30;$("remaining").textContent=String(remaining);
+    clock=setInterval(function(){remaining=Math.max(0,remaining-1);$("remaining").textContent=String(remaining);},1000);
+    stopTimer=setTimeout(function(){finish("30-second capture finished.");},30000);
+    for(var ch of reads){
+      if(!capturing)break;
+      try{var value=await ch.readValue();readTotal++;$("reads").textContent=String(readTotal);log("READ",ch.uuid,asBytes(value));}
+      catch(e){log("READ-ERR",ch.uuid,new Uint8Array(0));}
+    }
+    for(var n of notifications){
+      if(!capturing)break;
+      try{n.addEventListener("characteristicvaluechanged",onNotify);await n.startNotifications();log("NOTIFY-ON",n.uuid,new Uint8Array(0));}
+      catch(e){log("NOTIFY-ERR",n.uuid,new Uint8Array(0));}
+    }
+    if(capturing)state("Live capture running. Interact with the physical watch.","ok");
+  }
+  async function oneQuery(endpoint){
+    if(!verified||!capturing||sent||!$("risk").checked)return;
+    var ch=writers.get(endpoint);
+    if(!ch||!ch.properties.write)return;
+    if(!window.confirm("Send one UNVERIFIED 6-byte ID query to WATCH channel "+endpoint+"? The watch may freeze."))return;
+    sent=true;buttons();
+    var pkt=new Uint8Array([0xbc,0x3c,0x01,0x01,0x00,0x00]);log("TX-ID",ch.uuid,pkt);
+    try{await ch.writeValueWithResponse(pkt);log("GATT-OK",ch.uuid,new Uint8Array(0));state("Watch write acknowledged by GATT; watch protocol response still unknown.","ok");}
+    catch(e){log("GATT-ERR",ch.uuid,new Uint8Array(0));state("ID query failed or disconnected. No automatic retry.","err");}
+  }
+  $("connect").onclick=connect;$("disconnect").onclick=disconnect;
+  $("capture").onclick=capture;$("stop").onclick=function(){finish("Capture stopped.");};
+  $("risk").onchange=buttons;$("sendb").onclick=function(){oneQuery("0b");};$("sendc").onclick=function(){oneQuery("0c");};
+  $("clear").onclick=function(){logs=[];$("log").textContent="Cleared local report.";$("copy").disabled=true;};
+  $("copy").onclick=async function(){
+    if(!logs.length)return;
+    var report="MOMO WATCH 7 BLE REPORT\nFirmware: "+$("firmware").textContent+" Hardware: "+$("hardware").textContent+"\n"+logs.join("\n");
+    try{await navigator.clipboard.writeText(report);state("Report copied. Review for private device information before sharing.","ok");}
+    catch(e){state("Clipboard unavailable; select and copy the visible report.","err");}
+  };
+  if(!navigator.bluetooth||!window.isSecureContext)state("Web Bluetooth needs HTTPS and Chrome on your Pixel 7.","err");
+  buttons();
+})();
+</script></body></html>

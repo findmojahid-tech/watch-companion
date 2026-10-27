@@ -6,6 +6,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseKeystore = System.getenv("MOMO_SIGNING_KEYSTORE")
+val releaseStorePassword = System.getenv("MOMO_SIGNING_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("MOMO_SIGNING_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("MOMO_SIGNING_KEY_PASSWORD")
+val signingConfigured = listOf(
+    releaseKeystore, releaseStorePassword, releaseKeyAlias, releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.mojahid.watchcompanion"
     compileSdk = 35
@@ -23,10 +31,44 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        create("momoProduction") {
+            if (signingConfigured) {
+                storeFile = file(requireNotNull(releaseKeystore))
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
-            // Diagnostic APK installs beside V3 instead of replacing its tasks/key.
-            applicationIdSuffix = ".momo10"
+            // A development build always installs beside the eventual signed release.
+            applicationIdSuffix = ".dev"
+        }
+        getByName("release") {
+            // Never sign production with a disposable GitHub runner debug certificate.
+            if (signingConfigured) {
+                signingConfig = signingConfigs.getByName("momoProduction")
+            }
+        }
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            it.jvmArgs(
+                "--add-opens=java.base/java.lang=ALL-UNNAMED",
+                "--add-opens=java.base/java.util=ALL-UNNAMED",
+                "--add-opens=java.base/java.io=ALL-UNNAMED",
+                "--add-opens=java.base/java.net=ALL-UNNAMED",
+                "--add-opens=java.base/java.security=ALL-UNNAMED",
+                "--add-opens=java.base/java.text=ALL-UNNAMED",
+                "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+                "--add-opens=java.desktop/java.awt.font=ALL-UNNAMED",
+                "--add-opens=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED"
+            )
         }
     }
 
@@ -55,4 +97,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }
