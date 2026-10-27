@@ -226,6 +226,105 @@ fun MomoHome(
         status = "Momo is resting. Tap Start Momo when you want to talk."
     }
 
+    /**
+     * One tap: use only a specifically named Watch call endpoint. Do not hijack
+     * Pixel Buds/other headsets; no phone OS setting, root or firmware changes.
+     * This is a per-app communication audio route, not permanent pairing.
+     */
+    fun startWatchVoice() {
+        if (watchSpeechRunning || wakeEnabled || micTestRunning || voiceBusy || isBusy) return
+        if (!watch.isConnected) {
+            watchSpeechStatus = "Connect Watch 7 below before talking through the watch."
+            status = watchSpeechStatus
+            return
+        }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT)
+            != PackageManager.PERMISSION_GRANTED) {
+            watchSpeechStatus = "Allow Nearby devices to use Watch call."
+            requestPermissions.launch(arrayOf(Manifest.permission.BLUETOOTH_CONNECT))
+            return
+        }
+        audioRefresh()
+        val preferred = prefs.getString("preferred_audio_name", null)
+        val chosenId = WatchAudioRouting.choose(
+            audioChoices.map {
+                WatchAudioRouting.Candidate(it.id, it.productName?.toString().orEmpty())
+            },
+            preferred
+        )
+        val device = audioChoices.firstOrNull { it.id == chosenId }
+        if (device == null) {
+            watchSpeechStatus = if (audioChoices.isEmpty()) {
+                "No Watch call audio profile is available. Pair Watch call in Android Bluetooth settings."
+            } else {
+                "Cannot safely auto-pick a watch microphone. Choose your Watch call device below."
+            }
+            status = watchSpeechStatus
+            face = FaceState.CONFUSED
+            return
+        }
+        val routed = runCatching {
+            audio.mode = AudioManager.MODE_IN_COMMUNICATION
+            audio.setCommunicationDevice(device)
+        }.getOrDefault(false)
+        if (!routed) {
+            runCatching { audio.clearCommunicationDevice() }
+            runCatching { audio.mode = AudioManager.MODE_NORMAL }
+            watchSpeechStatus = "Android couldn't route audio to Watch call. Reconnect the watch and retry."
+            status = watchSpeechStatus
+            face = FaceState.CONFUSED
+            return
+        }
+
+        chosenAudio = device
+        val name = device.productName?.toString().orEmpty()
+        prefs.edit().putString("preferred_audio_name", name).apply()
+        audioInfo = name + " selected for Momo speech; use Release watch audio to restore phone."
+        watchSpeechRunning = true
+        face = FaceState.LISTENING
+        status = "Listening for your question on Watch 7..."
+        watchSpeechStatus = "Watch call selected. Speak in English within 9 seconds."
+
+        scope.launch {
+            // HFP/BLE Audio needs a short route-settle period on Pixel 7.
+            delay(650)
+            recognizeWatch(
+                prefs.getString("recognition_locale", "en-IN") ?: "en-IN",
+                { progress -> watchSpeechStatus = progress },
+                { result ->
+                    watchSpeechRunning = false
+                    val spoken = result.hypotheses.firstOrNull().orEmpty()
+                    val route = result.captureRoute
+                    when {
+                        !result.capturedFromWatch -> {
+                            watchSpeechStatus = "Watch microphone route NOT confirmed: " +
+                                route + ". No AI command was sent."
+                            face = FaceState.CONFUSED
+                        }
+                        spoken.isBlank() -> {
+                            watchSpeechStatus = "Watch microphone selected, but no English words recognized."
+                            face = FaceState.CONFUSED
+                        }
+                        else -> {
+                            watchSpeechStatus = "Watch mic AudioRecord route: " + route +
+                                ". Recognition service may still use a different input."
+                            val clean = spoken.replace(
+                                Regex("^(?:(?:hey|hi|hello)\\s+)?momo[\\s,.:!?]*",
+                                    RegexOption.IGNORE_CASE), ""
+                            ).trim().ifBlank { spoken }
+                            ask(clean)
+                        }
+                    }
+                },
+                { error ->
+                    watchSpeechRunning = false
+                    watchSpeechStatus = "Watch microphone: " + error
+                    face = FaceState.CONFUSED
+                }
+            )
+        }
+    }
+
     LaunchedEffect(Unit) {
         val permissions = mutableListOf(
             Manifest.permission.RECORD_AUDIO,
@@ -316,11 +415,30 @@ fun MomoHome(
             )
             Button(
                 onClick = { if (wakeEnabled) stopWake() else startWake() },
+                enabled = !watchSpeechRunning && !micTestRunning,
                 modifier = Modifier.fillMaxWidth().height(62.dp),
                 shape = RoundedCornerShape(21.dp)
             ) {
                 Text(if (wakeEnabled) "Stop Momo Listening" else "Start Momo Listening",
                     fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            }
+            Button(
+                onClick = { startWatchVoice() },
+                enabled = !wakeEnabled && !watchSpeechRunning && !micTestRunning &&
+                    !voiceBusy && !isBusy,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(17.dp)
+            ) {
+                Text(
+                    if (watchSpeechRunning) "Listening through Watch 7..."
+                    else "Talk through Watch 7",
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            if (!watch.isConnected) {
+                MomoNote("Connect Watch 7 below to activate the watch microphone.")
+            } else if (watchSpeechStatus.isNotBlank()) {
+                MomoNote(watchSpeechStatus)
             }
             if (!wakeEnabled) {
                 OutlinedButton(
@@ -663,6 +781,17 @@ fun MomoHome(
                     say("Hello! I am Momo. Can you hear me through your watch?")
                 }, modifier = Modifier.weight(1f)) { Text("Test speaker") }
             }
+            OutlinedButton(
+                onClick = {
+                    runCatching { audio.clearCommunicationDevice() }
+                    runCatching { audio.mode = AudioManager.MODE_NORMAL }
+                    chosenAudio = null
+                    audioInfo = "Watch call released. Phone audio is restored for this app."
+                    watchSpeechStatus = "Watch call audio route released."
+                },
+                enabled = !watchSpeechRunning && !micTestRunning && !wakeEnabled,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Release watch audio · restore phone") }
             MomoNote("A voice response can use Watch call without keeping BLE diagnostics open.")
             HorizontalDivider(color = Color(0xFF344155))
             Text("Watch microphone verification", color = Color.White,
@@ -694,48 +823,7 @@ fun MomoHome(
             MomoNote(micTestStatus)
 
             Button(
-                onClick = {
-                    if (watchSpeechRunning || wakeEnabled || micTestRunning) return@Button
-                    watchSpeechRunning = true
-                    watchSpeechStatus = "Speak into Watch 7 for up to 9 seconds. " +
-                        "Try: What is the capital of Bangladesh?"
-                    val accent = prefs.getString("recognition_locale", "en-IN") ?: "en-IN"
-                    recognizeWatch(
-                        accent,
-                        { progress ->
-                            watchSpeechStatus = progress
-                        },
-                        { result ->
-                            watchSpeechRunning = false
-                            val spoken = result.hypotheses.firstOrNull().orEmpty()
-                            val route = result.captureRoute
-                            if (!result.capturedFromWatch) {
-                                watchSpeechStatus = "Input source not confirmed as watch: " + route +
-                                    ". No AI command sent. Reconnect Watch call and retry."
-                                face = FaceState.CONFUSED
-                            } else if (spoken.isBlank()) {
-                                watchSpeechStatus = "Watch microphone was selected, " +
-                                    "but no English text was recognized. Please retry."
-                                face = FaceState.CONFUSED
-                            } else {
-                                watchSpeechStatus = "Heard through test: " + spoken +
-                                    "\nAudioRecord route: " + route +
-                                    "\nAndroid recognition may ignore injected input " +
-                                    "on some phones. Check that the phone was far away."
-                                val clean = spoken.replace(
-                                    Regex("^(?:(?:hey|hi|hello)\\s+)?momo[\\s,.:!?]*",
-                                        RegexOption.IGNORE_CASE), ""
-                                ).trim().ifBlank { spoken }
-                                ask(clean)
-                            }
-                        },
-                        { error ->
-                            watchSpeechRunning = false
-                            watchSpeechStatus = "Watch speech test: " + error
-                            face = FaceState.CONFUSED
-                        }
-                    )
-                },
+                onClick = { startWatchVoice() },
                 enabled = !wakeEnabled && !watchSpeechRunning && !micTestRunning && !voiceBusy && !isBusy,
                 modifier = Modifier.fillMaxWidth()
             ) {
