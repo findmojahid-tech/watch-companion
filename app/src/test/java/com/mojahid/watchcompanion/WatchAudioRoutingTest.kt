@@ -35,4 +35,16 @@ class WatchAudioRoutingTest {
             listOf(d(7, "watch 7")), null
         ))
     }
+    @Test fun savedUserChosenBtCallDeviceCanBeReusedWithoutGuessing() {
+        assertEquals(12, WatchAudioRouting.choose(
+            listOf(d(10, "Pixel Buds"), d(12, "BT Call")), "BT Call"
+        ))
+    }
+
+    @Test fun duplicateSavedNameIsNotEnoughToSelectAnUnrelatedHeadset() {
+        assertNull(WatchAudioRouting.choose(
+            listOf(d(11, "BT Call"), d(12, "BT Call")), "BT Call"
+        ))
+    }
+
 }
