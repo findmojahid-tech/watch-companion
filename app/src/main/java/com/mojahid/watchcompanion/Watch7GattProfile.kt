@@ -76,9 +76,11 @@ object Watch7GattProfile {
                 "$readOnly read-only vendor characteristics, " +
                 "$vendorWriters UNVERIFIED vendor write endpoints, " +
                 "$otaWriters Goodix-style OTA-associated write endpoints. " +
-                "The 0402/0403 properties differ from Goodix's published GR551x layout. " +
-                "No confirmed face-transfer command. Goodix OTA and arbitrary " +
-                "vendor writes are blocked; the optional one-shot ID query is experimental."
+                "Goodix's official open-source DFU code matches 0402 notify, " +
+                "0403 write and 0404 control; missing INDICATE is consistent " +
+                "with its older DFU v1 branch. This is a firmware-update channel, " +
+                "NOT a watch-face API. OTA and arbitrary vendor writes remain " +
+                "blocked; the optional one-shot ID query is experimental."
             matchingServices -> "Watch 7 vendor service family detected, but firmware, " +
                 "hardware, or characteristic flags differ from the recorded 4.21 profile. " +
                 "No face-transfer command is verified; do not send vendor/OTA writes."
