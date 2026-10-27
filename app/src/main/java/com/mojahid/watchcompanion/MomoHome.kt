@@ -837,6 +837,7 @@ fun MomoHome(
                 Text("Capture 30 seconds of watch BLE traffic")
             }
             val queryEvidence = Watch7PacketAnalysis.evaluate(watchProbe.events)
+            val faceEvidence = Watch7PacketAnalysis.evaluateFaceChange(watchProbe.events)
             if (watchProbe.running) {
                 OutlinedButton(
                     onClick = { directWatch.markWatchFaceChange() },
@@ -882,6 +883,9 @@ fun MomoHome(
             if (queryEvidence.queryRecorded) {
                 MomoNote(queryEvidence.explanation)
             }
+            if (faceEvidence.markerRecorded) {
+                MomoNote(faceEvidence.explanation)
+            }
             if (watchProbe.events.isNotEmpty()) {
                 MomoNote("Capture records: " + watchProbe.events.size +
                     " (notifications: " + watchProbe.receivedPackets + "). " +
@@ -906,6 +910,12 @@ fun MomoHome(
                             .append(queryEvidence.postQueryCommandGroupNotifications)
                             .append("\n")
                         append("Analysis: ").append(queryEvidence.explanation).append("\n")
+                        append("Physical face-change marker: ")
+                            .append(faceEvidence.markerRecorded).append("\n")
+                        append("Notifications AFTER face marker: ")
+                            .append(faceEvidence.notificationsAfterMarker).append("\n")
+                        append("Face action correlation: ").append(faceEvidence.explanation)
+                            .append("\n")
                         append("Total notifications: ").append(watchProbe.receivedPackets)
                         append("\n").append(watchProbe.events.joinToString("\n"))
                     }
