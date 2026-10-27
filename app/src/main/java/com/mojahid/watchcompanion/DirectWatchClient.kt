@@ -317,9 +317,17 @@ class DirectWatchClient(private val context: Context) {
      */
     @SuppressLint("MissingPermission")
     @Suppress("DEPRECATION")
-    fun sendExperimentalProductId(endpoint: String) {
+    fun sendExperimentalProductId(endpoint: String) = sendExperimentalIdentity(endpoint, "NJJ")
+
+    /** Owner-approved watch-only capability probe, no firmware/resource transfer. */
+    fun sendExperimentalJieliFeature(endpoint: String) =
+        sendExperimentalIdentity(endpoint, "JIELI_RCSP")
+
+    @SuppressLint("MissingPermission")
+    @Suppress("DEPRECATION")
+    private fun sendExperimentalIdentity(endpoint: String, protocol: String) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            handler.post { sendExperimentalProductId(endpoint) }
+            handler.post { sendExperimentalIdentity(endpoint, protocol) }
             return
         }
         if (!probeRunning || !connected || probeIdSent) {
@@ -348,11 +356,18 @@ class DirectWatchClient(private val context: Context) {
             addProbeEvent("ID query blocked: write-with-response endpoint not found.")
             return
         }
-        probeIdSent = true // no retry, even after a failed attempt
+        val packet = when (protocol) {
+            "JIELI_RCSP" -> JieliRcspProbe.readOnlyFeatureQuery
+            "NJJ" -> Watch7PassiveProbe.speculativeProductIdQuery
+            else -> {
+                addProbeEvent("Identity probe blocked: unknown protocol variant.")
+                return
+            }
+        }
+        probeIdSent = true // exactly one attempt per capture, never automatic retry
         probePendingWriteUuid = characteristic.uuid
-        val packet = Watch7PassiveProbe.speculativeProductIdQuery
-        addProbeEvent("TX ID QUERY on " + uuid.substring(0, 8) + ": " +
-            Watch7PassiveProbe.briefHex(packet))
+        addProbeEvent("TX ID QUERY on " + uuid.substring(0, 8) +
+            " [" + protocol + "]: " + Watch7PassiveProbe.briefHex(packet))
         val accepted = runCatching {
             if (Build.VERSION.SDK_INT >= 33) {
                 connection.writeCharacteristic(
@@ -409,6 +424,12 @@ class DirectWatchClient(private val context: Context) {
             if (!Watch7PassiveProbe.canSubscribe(
                     serviceId, ch.uuid.toString(), ch.properties)) return@post
             addProbeEvent(Watch7PassiveProbe.entry("NOTIFY", ch.uuid.toString(), bytes), true)
+            // Strict frame detection; GATT ACK alone is not RCSP support.
+            if (probeIdSent && JieliRcspProbe.isFeatureReply(bytes)) {
+                addProbeEvent("JIELI RCSP feature reply frame from " +
+                    ch.uuid.toString().substring(0, 8) +
+                    " (valid framed device response; dial upload still unverified)")
+            }
         }
     }
 
