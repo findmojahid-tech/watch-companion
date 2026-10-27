@@ -821,10 +821,11 @@ fun MomoHome(
             HorizontalDivider(color = Color(0xFF35495C))
             Text("Watch-only BLE experiment", color = Color.White,
                 fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-            MomoNote("For Watch 7 firmware 4.21 only. Read five unknown vendor " +
-                "values and listen to eight notification sources for 30 seconds. " +
-                "Only standard BLE notification subscriptions are written. " +
-                "No dial, proprietary command, OTA, or phone setting is changed.")
+            MomoNote("For Watch 7 firmware 4.21 only: read five vendor values " +
+                "and monitor eight notification sources for 30 seconds. " +
+                "Passive mode only changes temporary BLE notification subscriptions. " +
+                "Optional ID query on 0b OR 0c is experimental and requires consent. " +
+                "No dial/OTA file or Android phone firmware is written.")
             OutlinedButton(
                 onClick = {
                     watchProbeAccepted = false
@@ -835,6 +836,7 @@ fun MomoHome(
             ) {
                 Text("Capture 30 seconds of watch BLE traffic")
             }
+            val queryEvidence = Watch7PacketAnalysis.evaluate(watchProbe.events)
             if (watchProbe.running) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
@@ -849,12 +851,12 @@ fun MomoHome(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = { directWatch.sendExperimentalProductId("0b") },
-                        enabled = watchProbeAccepted,
+                        enabled = watchProbeAccepted && !queryEvidence.queryRecorded,
                         modifier = Modifier.weight(1f)
                     ) { Text("ID query on 0b") }
                     OutlinedButton(
                         onClick = { directWatch.sendExperimentalProductId("0c") },
-                        enabled = watchProbeAccepted,
+                        enabled = watchProbeAccepted && !queryEvidence.queryRecorded,
                         modifier = Modifier.weight(1f)
                     ) { Text("ID query on 0c") }
                 }
@@ -868,6 +870,9 @@ fun MomoHome(
                 }
             }
             MomoNote(watchProbe.status)
+            if (queryEvidence.queryRecorded) {
+                MomoNote(queryEvidence.explanation)
+            }
             if (watchProbe.events.isNotEmpty()) {
                 MomoNote("Capture records: " + watchProbe.events.size +
                     " (notifications: " + watchProbe.receivedPackets + "). " +
@@ -881,8 +886,18 @@ fun MomoHome(
                 OutlinedButton(onClick = {
                     val summary = buildString {
                         append("MOMO Watch 7 passive BLE capture\n")
-                        append("Firmware 4.21 / hardware 1.0; watch-only; no vendor commands\n")
-                        append("Notification count: ").append(watchProbe.receivedPackets)
+                        append("Firmware 4.21 / hardware 1.0. No OTA, no face upload.\n")
+                        append("Optional owner-approved product-ID query: ")
+                            .append(queryEvidence.queryRecorded).append("\n")
+                        append("GATT write accepted (not proof of watch response): ")
+                            .append(queryEvidence.gattWriteAccepted).append("\n")
+                        append("Notifications AFTER query: ")
+                            .append(queryEvidence.postQueryNotifications).append("\n")
+                        append("Command-group notifications AFTER query: ")
+                            .append(queryEvidence.postQueryCommandGroupNotifications)
+                            .append("\n")
+                        append("Analysis: ").append(queryEvidence.explanation).append("\n")
+                        append("Total notifications: ").append(watchProbe.receivedPackets)
                         append("\n").append(watchProbe.events.joinToString("\n"))
                     }
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
