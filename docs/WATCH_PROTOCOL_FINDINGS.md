@@ -142,24 +142,34 @@ revision. An unrelated MActivePro/NJJ watch report uses FF02/FF03 under
 `000001ff`, which **does not match these actual Watch 7 services**:
 https://github.com/pedrohsipriano/hub-saude
 
-### Important Goodix DFU mismatch (confirmed against Goodix GR551x DFU Note Rev 1.8)
+### Goodix DFU mapping verified against vendor source (2026-10-27)
 
-The actual W17 Pro 4.21 properties differ from the published reference:
+**Correction:** An earlier note incorrectly called the 0402/0403 GATT directions
+on this W17 Pro a mismatch. The upstream Goodix Android **DFU v2**
+implementation actually declares:
 
-| Characteristic | Goodix GR551x Rev 1.8 | This physical Watch 7 |
+| Characteristic | Official Goodix Android role | Physical Watch 7 firmware 4.21 |
 |---|---|---|
-| `a6ed0402` | Write Without Response (OTA RX) | **NOTIFY** |
-| `a6ed0403` | Notify/Indicate (OTA TX) | **WRITE_NO_RESPONSE** |
-| `a6ed0404` | Write Without Response/Indicate (OTA Control) | **WRITE_NO_RESPONSE** |
+| `a6ed0402` | DFU notification (device → app) | NOTIFY — **matches** |
+| `a6ed0403` | DFU write (app → device) | WRITE_NO_RESPONSE — **matches** |
+| `a6ed0404` | DFU control | WRITE_NO_RESPONSE — **matches** |
 
-Official spec: https://www.goodix.com/en/docview/GR551x%20DFU%20Application%20Note?objectId=62&objectType=document&version=171 (section 4.2.1, Table 4-1).
+Official vendor implementation:
+https://github.com/goodix-ble/GoodixBleDFU.Android/blob/master/libdfu2/src/main/java/com/goodix/ble/gr/lib/dfu/v2/DfuProfile.java
 
-So even though the **service UUID matches**, its actual properties do **not**
-match the specific GR551x reference arrangement. The characteristic IDs
-alone do not authorize using a generic Goodix DFU tool or packets; the
-firmware may use another revision/variant of the OTA profile. Treat these
-as **OTA-associated unknown writers**, not confirmed dial commands. Keep
-all writes disabled.
+Goodix's implementation uses the `0404` INDICATE bit to distinguish its
+app-bootloader-capable v2 path from the legacy v1 path; the owner's
+`0404` does not expose INDICATE, **consistent with v1 behavior**.
+That is a protocol-family indicator only: actual device firmware, bootloader
+security and recovery have not been proven on this individual watch.
+
+**The service is genuinely Goodix-style firmware DFU, not a dial command
+service.** Knowing the correct directions is NOT permission to send arbitrary
+face assets/firmware through it. The experimental Momo application intentionally
+excludes all `a6ed0401` operations, even though the owner now permits
+watch-side experiments. Any separate DFU test must verify compatible firmware
+image, exact chip/board, recovery and signing requirements before risking it.
+
 
 ## Opt-in passive vendor channel capture (experimental branch)
 
