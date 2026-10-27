@@ -85,6 +85,7 @@ class DirectWatchClient(private val context: Context) {
     private var probeTimer: Runnable? = null
     private var probeRunning = false
     private var probeIdSent = false
+    private var probeAutoJieli = false
     private var probeStartedAtMs = 0L
     private var probePendingWriteUuid: UUID? = null
 
@@ -175,9 +176,9 @@ class DirectWatchClient(private val context: Context) {
      * transmits face/OTA data. The session is closed on exit so standard
      * notification subscriptions cannot linger, then normal BLE reconnects.
      */
-    fun startPassiveCapture() {
+    fun startPassiveCapture(autoIdentifyJieli: Boolean = false) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            handler.post { startPassiveCapture() }
+            handler.post { startPassiveCapture(autoIdentifyJieli) }
             return
         }
         if (probeRunning) return
@@ -222,6 +223,7 @@ class DirectWatchClient(private val context: Context) {
         }
 
         probeRunning = true
+        probeAutoJieli = autoIdentifyJieli
         probeStartedAtMs = SystemClock.elapsedRealtime()
         probeIdSent = false
         probePendingWriteUuid = null
@@ -297,6 +299,12 @@ class DirectWatchClient(private val context: Context) {
             status = "Vendor reads finished. Watching for BLE notifications; " +
                 "interact with the watch until the 30-second capture ends."
         )
+        if (probeAutoJieli && !probeIdSent) {
+            probeAutoJieli = false
+            // Explicitly selected before starting this capture. Never OTA.
+            // GATT is idle: vendor READs and standard CCCDs all completed.
+            sendExperimentalJieliFeature("0b")
+        }
     }
 
     /** Phone-side timestamp marker only. Makes a real watch action correlatable. */
@@ -451,6 +459,7 @@ class DirectWatchClient(private val context: Context) {
         probeDescriptorUuid = null
         probePendingWriteUuid = null
         probeIdSent = false
+        probeAutoJieli = false
         probeStartedAtMs = 0L
         standardReadPending = false
         readQueue.clear()
