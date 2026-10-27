@@ -92,4 +92,19 @@ class Watch7PacketAnalysisTest {
         assertEquals(0, result.notificationsAfterMarker)
     }
 
+    @Test fun validJieliFeatureReplyAfterQueryIsReportedButNotCalledDialSupport() {
+        val events = listOf(
+            "[+100ms] TX ID QUERY on 6e40000b [JIELI_RCSP]: FE DC BA 03 02 00 00 EF",
+            "[+125ms] ID query GATT accepted; watch reply still unverified.",
+            "[+155ms] NOTIFY 6e40000d (10 B): FE DC BA 03 01 00 02 08 01 EF",
+            "[+155ms] JIELI RCSP feature reply frame from 6e40000d (valid framed device response; dial upload still unverified)"
+        )
+        val parsed = Watch7PacketAnalysis.evaluate(events)
+        assertTrue(parsed.queryRecorded)
+        assertTrue(parsed.gattWriteAccepted)
+        assertTrue(parsed.jieliFeatureReply)
+        assertEquals(1, parsed.postQueryCommandGroupNotifications)
+        assertTrue(parsed.explanation.contains("watchface compatibility is NOT proven"))
+    }
+
 }
