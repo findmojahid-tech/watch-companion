@@ -126,3 +126,36 @@ speech/AI, stable signing and physical acceptance. This implementation does
 **not** meet the final watch-face acceptance gate by itself.
 
 No new owner-facing APK has been published and PR #12 remains unmerged.
+
+## Physical BLE capture result received from owner (2026-10-27)
+
+The owner installed the previous experimental Android build and performed
+a **real W17 Pro firmware 4.21 / hardware 1.0 BLE capture**:
+
+- Verified the exact 11-characteristic service fingerprint.
+- Five vendor READ attempts; four succeeded. `6e400008` returned GATT
+  status 1 on READ but subsequently emitted a NOTIFY.
+- Eight NOTIFY subscriptions completed; six notifications received:
+  one on `6e400006`, three on `6e400007`, one each on
+  `6e400008` and `6e400009`.
+- The READ payloads reveal candidate strings `H01P`, `4.21`,
+  `2.0.4` (not fully decoded).
+- Owner opted in to one six-byte NJJ-family ID query via
+  `6e40000b`; Android GATT write callback succeeded, but **no
+  subsequent watch notification** was recorded, and there is NO
+  verified watch-level acknowledgement.
+- **Nothing was uploaded to the watch display.** Watchface transport,
+  expression animation, voice transport and end-to-end acceptance remain
+  unverified. Phone OS, firmware and root status were not changed.
+
+**Next branch work actually implemented:** `Watch7PacketAnalysis` decodes
+the candidate ASCII fragments, accurately segregates pre-query from
+post-query notifications, and correlates watch-face interaction events
+with local marker timestamps. Events now include relative elapsed times
+and up to 48 hex bytes, enough to preserve the previously truncated
+40-byte characteristic. See `docs/W17_REAL_BLE_CAPTURE_2026-10-27.md`
+for sanitized evidence (no raw device token/serial in the repository).
+
+No additional test installs required merely to interpret the **existing**
+capture. The production-signing, dial upload and final hardware
+acceptance gates remain **open**. Do not release as "Momo Final".
