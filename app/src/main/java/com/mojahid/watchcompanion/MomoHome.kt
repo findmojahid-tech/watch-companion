@@ -912,7 +912,7 @@ fun MomoHome(
             MomoNote("For Watch 7 firmware 4.21 only: read five vendor values " +
                 "and monitor eight notification sources for 30 seconds. " +
                 "Passive mode only changes temporary BLE notification subscriptions. " +
-                "Optional ID query on 0b OR 0c is experimental and requires consent. " +
+                "Optional JieLi identification query on 0b OR 0c requires consent. " +
                 "No dial/OTA file or Android phone firmware is written.")
             OutlinedButton(
                 onClick = {
@@ -948,20 +948,20 @@ fun MomoHome(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
-                        onClick = { directWatch.sendExperimentalProductId("0b") },
+                        onClick = { directWatch.sendExperimentalJieliFeature("0b") },
                         enabled = watchProbeAccepted && !queryEvidence.queryRecorded,
                         modifier = Modifier.weight(1f)
-                    ) { Text("ID query on 0b") }
+                    ) { Text("JieLi identify 0b") }
                     OutlinedButton(
-                        onClick = { directWatch.sendExperimentalProductId("0c") },
+                        onClick = { directWatch.sendExperimentalJieliFeature("0c") },
                         enabled = watchProbeAccepted && !queryEvidence.queryRecorded,
                         modifier = Modifier.weight(1f)
-                    ) { Text("ID query on 0c") }
+                    ) { Text("JieLi identify 0c") }
                 }
                 MomoNote("Only one query per capture, on 0b OR 0c. " +
-                    "The fixed query is borrowed from an unrelated Microwear/NJJ " +
-                    "protocol, so it may do nothing or disrupt the watch. " +
-                    "It never writes to the Goodix OTA service.")
+                    "The 8-byte JieLi RCSP GET_TARGET_FEATURE query is experimental: " +
+                    "AC6954 is listed for some W17 Pros, but this exact firmware " +
+                    "has not been validated. No Goodix OTA or face file is sent.")
                 TextButton(onClick = { directWatch.stopPassiveCapture() },
                     modifier = Modifier.fillMaxWidth()) {
                     Text("Stop capture and reconnect watch")
@@ -988,7 +988,7 @@ fun MomoHome(
                     val summary = buildString {
                         append("MOMO Watch 7 passive BLE capture\n")
                         append("Firmware 4.21 / hardware 1.0. No OTA, no face upload.\n")
-                        append("Optional owner-approved product-ID query: ")
+                        append("Optional owner-approved identification query: ")
                             .append(queryEvidence.queryRecorded).append("\n")
                         append("GATT write accepted (not proof of watch response): ")
                             .append(queryEvidence.gattWriteAccepted).append("\n")
