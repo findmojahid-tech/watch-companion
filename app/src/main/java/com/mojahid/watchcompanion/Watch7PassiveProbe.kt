@@ -49,7 +49,7 @@ object Watch7PassiveProbe {
             flags and 0x10 != 0 // PROPERTY_NOTIFY
 
     /** Safe, bounded log; raw captured bytes never leave app memory automatically. */
-    fun briefHex(bytes: ByteArray, maxBytes: Int = 36): String {
+    fun briefHex(bytes: ByteArray, maxBytes: Int = 48): String {
         val preview = bytes.take(maxBytes.coerceIn(1, 64))
             .joinToString(" ") { "%02X".format(it.toInt() and 0xff) }
         return preview + if (bytes.size > maxBytes.coerceIn(1, 64)) " ..." else ""
