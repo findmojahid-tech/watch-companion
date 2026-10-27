@@ -97,6 +97,7 @@ fun MomoHome(
     }
     var showAdvanced by remember { mutableStateOf(false) }
     var watchProbeAccepted by remember { mutableStateOf(false) }
+    var watchAutoIdentify by remember { mutableStateOf(false) }
     var showTasks by remember { mutableStateOf(false) }
     var tasks by remember { mutableStateOf(taskEngine.tasks()) }
     var aiKey by remember { mutableStateOf("") }
@@ -914,15 +915,30 @@ fun MomoHome(
                 "Passive mode only changes temporary BLE notification subscriptions. " +
                 "Optional JieLi identification query on 0b OR 0c requires consent. " +
                 "No dial/OTA file or Android phone firmware is written.")
+            if (!watchProbe.running) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = watchAutoIdentify,
+                        onCheckedChange = { watchAutoIdentify = it }
+                    )
+                    Text("One-tap identify: also send ONE experimental JieLi query " +
+                        "to my watch (watch risk accepted; never phone firmware).",
+                        color = MomoSoft, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f))
+                }
+            }
             OutlinedButton(
                 onClick = {
                     watchProbeAccepted = false
-                    directWatch.startPassiveCapture()
+                    val auto = watchAutoIdentify
+                    watchAutoIdentify = false // fresh consent next session
+                    directWatch.startPassiveCapture(auto)
                 },
                 enabled = watch.isConnected && !watchProbe.running,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Capture 30 seconds of watch BLE traffic")
+                Text(if (watchAutoIdentify) "Diagnose Watch 7 and identify JieLi"
+                     else "Capture 30 seconds of watch BLE traffic")
             }
             val queryEvidence = Watch7PacketAnalysis.evaluate(watchProbe.events)
             val faceEvidence = Watch7PacketAnalysis.evaluateFaceChange(watchProbe.events)
