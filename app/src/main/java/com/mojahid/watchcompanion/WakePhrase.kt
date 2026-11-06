@@ -1,11 +1,11 @@
 package com.mojahid.watchcompanion
 
-/** Exact English trigger matching without treating "momoring" as "Momo". */
+/** Exact English trigger matching without treating "tiffying" as "Tiffy". */
 data class WakePhraseResult(val detected: Boolean, val command: String)
 
 object WakePhrase {
     private val prefix = Regex(
-        """^(?:(?:hey|hello|hi)\s+)?momo(?=$|[\s,.:!?])[\s,.:!?]*""",
+        """^(?:(?:hey|hello|hi)\s+)?tiffy(?=$|[\s,.:!?])[\s,.:!?]*""",
         RegexOption.IGNORE_CASE
     )
 
