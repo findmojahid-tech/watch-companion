@@ -14,7 +14,7 @@ data class OpenAiStatus(val model: String, val testReply: String)
 
 object OpenAiClient {
     // Lightweight model for quick conversational replies; change here after measuring latency.
-    const val MODEL = "gpt-6-luna"
+    const val MODEL = "gpt-4.1-mini"
     private const val ENDPOINT = "https://api.openai.com/v1/responses"
 
     internal fun extractReply(payload: String): String {
