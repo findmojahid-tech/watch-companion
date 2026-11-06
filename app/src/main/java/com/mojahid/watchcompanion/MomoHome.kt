@@ -333,6 +333,13 @@ fun MomoHome(
             pairedWatches = directWatch.pairedWatches()
             directWatch.reconnectIfEnabled()
         } else {
+            // Don't carry an old W17 audio route into the new D395 profile.
+            if (!prefs.getBoolean("tiffy_cmf_mode_initialized", false)) {
+                prefs.edit()
+                    .remove("preferred_audio_name")
+                    .putBoolean("tiffy_cmf_mode_initialized", true)
+                    .apply()
+            }
             // Do not compete with the paired CMF Watch app for GATT access.
             directWatch.disconnect()
         }
@@ -705,7 +712,15 @@ fun MomoHome(
                     onCheckedChange = { enabled ->
                         useCmfWatch = enabled
                         prefs.edit().putBoolean("tiffy_cmf_d395_audio_mode", enabled).apply()
-                        if (enabled) directWatch.disconnect()
+                        if (enabled) {
+                            prefs.edit().putBoolean("tiffy_cmf_mode_initialized", true).apply()
+                            directWatch.disconnect()
+                            // Old W17 audio preference must not hijack CMF sessions.
+                            prefs.edit().remove("preferred_audio_name").apply()
+                            runCatching { audio.clearCommunicationDevice() }
+                            runCatching { audio.mode = AudioManager.MODE_NORMAL }
+                            chosenAudio = null
+                        }
                         audioRefresh()
                         status = if (enabled) "Using paired CMF Watch Pro audio."
                             else "Legacy Watch 7 GATT diagnostics enabled."
@@ -933,6 +948,23 @@ fun MomoHome(
                 MomoNote("CMF Watch controls its watch faces. Static image faces may " +
                     "be supported, but Tiffy animated eyes and direct dial uploads " +
                     "are NOT verified. No firmware or proprietary BLE writes.")
+                Button(
+                    onClick = {
+                        dialInfo = if (MomoFaceExport.saveToGallery(
+                                context, MomoFaceExport.Target.CMF_D395
+                            )) {
+                            "Saved TIFFY-CMF-D395 (410x502 PNG) in Pictures/Tiffy. " +
+                                "Open CMF Watch to select it as a CUSTOM background."
+                        } else {
+                            "Could not save the Tiffy PNG to Gallery."
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Create TIFFY D395 face image") }
+                if (dialInfo.isNotBlank()) MomoNote(dialInfo)
+                MomoNote("CMF Watch app → Watch Face marketplace → My → " +
+                    "Customize Watch Face → choose the Tiffy background → " +
+                    "apply to watch. This is a static background, not live animation.")
                 MomoNote("The animated face in the Pixel 7 app is not on " +
                     "the physical watch screen.")
             }
