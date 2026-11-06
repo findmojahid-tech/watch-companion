@@ -481,7 +481,7 @@ fun MomoHome(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f))
                 Text(
-                    if (cloudConfigured) "KEY SAVED" else "SETUP",
+                    if (cloudConfigured || !openAiKeys.read().isNullOrBlank()) "KEY SAVED" else "SETUP",
                     color = MomoBlue,
                     style = MaterialTheme.typography.labelMedium
                 )
