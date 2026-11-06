@@ -189,7 +189,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             if (!watchReady) {
                 prefs.edit().putString(
                     "wake_last_status",
-                    "Watch call disconnected. Reconnect the watch audio in Momo."
+                    "Watch call disconnected. Reconnect the watch audio in Tiffy."
                 ).apply()
                 routeToPreferredWatch()
                 scheduleListening(5000)
