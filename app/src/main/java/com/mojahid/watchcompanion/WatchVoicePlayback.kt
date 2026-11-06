@@ -40,6 +40,7 @@ class WatchVoicePlayback(
     private var pendingWav: File? = null
     private var selected: AudioDeviceInfo? = null
     private var player: MediaPlayer? = null
+    private var routeVerified = false
     private var status: ((String) -> Unit)? = null
     private var afterPlayback: (() -> Unit)? = null
 
@@ -49,14 +50,14 @@ class WatchVoicePlayback(
             override fun onDone(utteranceId: String) {
                 handler.post {
                     if (pendingId == utteranceId) startPlayer()
-                    else onLegacySpeechFinished?.invoke()
+                    else if (!utteranceId.startsWith("tiffy-watch-")) onLegacySpeechFinished?.invoke()
                 }
             }
             override fun onError(utteranceId: String) {
                 handler.post {
                     if (pendingId == utteranceId) finish(
                         "Watch voice synthesis failed. Nothing sent to phone speaker."
-                    ) else onLegacySpeechFinished?.invoke()
+                    ) else if (!utteranceId.startsWith("tiffy-watch-")) onLegacySpeechFinished?.invoke()
                 }
             }
             override fun onStop(utteranceId: String, interrupted: Boolean) {
@@ -76,7 +77,7 @@ class WatchVoicePlayback(
             handler.post { speak(text, onStatus, onFinished) }
             return
         }
-        clear(false)
+        clear(true)
         status = onStatus
         afterPlayback = onFinished
 
@@ -93,6 +94,7 @@ class WatchVoicePlayback(
         }
 
         selected = output
+        routeVerified = false
         val id = "tiffy-watch-" + UUID.randomUUID()
         val wav = File(context.cacheDir, id + ".wav")
         pendingId = id
@@ -145,7 +147,11 @@ class WatchVoicePlayback(
             }
             mp.setOnCompletionListener {
                 if (player === it) {
-                    finish("Voice playback completed through the selected watch route.")
+                    finish(if (routeVerified) {
+                        "Watch audio playback completed. Confirm sound on physical D395."
+                    } else {
+                        "Android never confirmed watch output; no successful playback claimed."
+                    })
                 }
             }
             mp.prepareAsync()
@@ -165,6 +171,7 @@ class WatchVoicePlayback(
                     actual.productName?.toString()?.lowercase(Locale.ROOT) ==
                     target.productName?.toString()?.lowercase(Locale.ROOT))
             if (recognized) {
+                routeVerified = true
                 mp.setVolume(1f, 1f)
                 status?.invoke("Android active output: " + actual!!.productName +
                     " (Bluetooth call audio). Please confirm sound on physical D395.")
@@ -195,6 +202,7 @@ class WatchVoicePlayback(
         if (cancelTts) runCatching { tts.stop() }
         pendingId = null
         selected = null
+        routeVerified = false
         val oldPlayer = player
         player = null
         if (oldPlayer != null) {
