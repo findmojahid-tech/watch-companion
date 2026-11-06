@@ -100,7 +100,7 @@ class WatchSpeechBridge(
         SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
             "No speech detected. Press the button and speak close to your watch."
         SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
-            "Recognizer busy. Stop Momo Listening and try once more."
+            "Recognizer busy. Stop Tiffy Listening and try once more."
         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
             "Speech recognizer needs microphone permission."
         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
