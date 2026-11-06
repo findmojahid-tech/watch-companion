@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main, "build/**", "integration/momo-final" ]
+    branches: [ main, "build/**", "integration/momo-final", "feature/tiffy-jarvis-openai" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
