@@ -83,7 +83,7 @@ class WatchVoicePlayback(
 
         val preferred = prefs.getString("preferred_audio_name", null)?.trim().orEmpty()
         val output = manager.communicationDevice
-        val allowed = output != null &&
+        val allowed = preferred.isNotBlank() && output != null &&
             (output.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
                 output.type == AudioDeviceInfo.TYPE_BLE_HEADSET) &&
             output.productName?.toString()?.equals(preferred, ignoreCase = true) == true
@@ -168,8 +168,9 @@ class WatchVoicePlayback(
                 (actual.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
                     actual.type == AudioDeviceInfo.TYPE_BLE_HEADSET) &&
                 (actual.id == target.id ||
-                    actual.productName?.toString()?.lowercase(Locale.ROOT) ==
-                    target.productName?.toString()?.lowercase(Locale.ROOT))
+                    (target.productName?.toString()?.isNotBlank() == true &&
+                        actual.productName?.toString()?.lowercase(Locale.ROOT) ==
+                            target.productName?.toString()?.lowercase(Locale.ROOT)))
             if (recognized) {
                 routeVerified = true
                 mp.setVolume(1f, 1f)
