@@ -53,12 +53,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
     private var recognizer: SpeechRecognizer? = null
     private var watchSpeech: WatchSpeechBridge? = null
+    private var watchVoice: WatchVoicePlayback? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         watchSpeech = WatchSpeechBridge(this, audio)
         tts = TextToSpeech(this, this)
+        watchVoice = WatchVoicePlayback(this, audio, tts)
 
         setContent {
             MaterialTheme(
@@ -100,9 +102,17 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun speak(message: String) {
-        if (::tts.isInitialized) tts.speak(
-            message.take(1600), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString()
-        )
+        val prefs = getSharedPreferences("momo_runtime", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("tiffy_cmf_d395_audio_mode", true)) {
+            watchVoice?.speak(message) { report ->
+                prefs.edit().putString("tiffy_audio_status", report).apply()
+            }
+        } else if (::tts.isInitialized) {
+            tts.speak(
+                message.take(1600), TextToSpeech.QUEUE_FLUSH,
+                null, UUID.randomUUID().toString()
+            )
+        }
     }
 
     private fun startRecognizing(
@@ -186,6 +196,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         watchSpeech = null
         recognizer?.destroy()
         recognizer = null
+        watchVoice?.stop()
+        watchVoice = null
         if (::tts.isInitialized) {
             tts.stop()
             tts.shutdown()
