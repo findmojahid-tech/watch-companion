@@ -7,18 +7,18 @@ import org.junit.Test
 
 class WakePhraseTest {
     @Test fun recognizesExactWakeWords() {
-        listOf("Momo", "Hey Momo", "hello momo", "hi MOMO", " Momo! ").forEach {
+        listOf("Tiffy", "Hey Tiffy", "hello tiffy", "hi TIFFY", " Tiffy! ").forEach {
             assertTrue(it, WakePhrase.parse(it).detected)
         }
     }
 
     @Test fun extractsSpokenCommandWithoutWakePrefix() {
-        assertEquals("what is the weather?", WakePhrase.parse("Hey Momo, what is the weather?").command)
-        assertEquals("set a task", WakePhrase.parse("Momo: set a task").command)
+        assertEquals("what is the weather?", WakePhrase.parse("Hey Tiffy, what is the weather?").command)
+        assertEquals("set a task", WakePhrase.parse("Tiffy: set a task").command)
     }
 
     @Test fun rejectsSimilarNamesAndEmbeddedWords() {
-        listOf("Momoko", "Hey Momoko", "momoring", "Call Momo", "Momo123", "Hi momos").forEach {
+        listOf("Tiffyko", "Hey Tiffyko", "tiffyring", "Call Tiffy", "Tiffy123", "Hi tiffys").forEach {
             assertFalse(it, WakePhrase.parse(it).detected)
         }
     }
@@ -28,8 +28,8 @@ class WakePhraseTest {
         assertEquals(text, WakePhrase.parse(text).command)
     }
     @Test fun choosesExactWakeFromAlternateRecognitionHypotheses() {
-        val options = listOf("Hey Momoko what time is it", "Hey Momo what time is it")
-        assertEquals("Hey Momo what time is it", WakePhrase.selectHypothesis(options))
+        val options = listOf("Hey Tiffyko what time is it", "Hey Tiffy what time is it")
+        assertEquals("Hey Tiffy what time is it", WakePhrase.selectHypothesis(options))
     }
 
     @Test fun preservesBestGuessForAwaitedFollowUp() {

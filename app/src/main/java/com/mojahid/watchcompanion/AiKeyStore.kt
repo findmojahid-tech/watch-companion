@@ -10,10 +10,14 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Device-local encryption for the user's personal AI Studio API key. Never log it. */
-class AiKeyStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences("momo_ai_secrets", Context.MODE_PRIVATE)
-    private val alias = "momo_gemini_key_v1"
+/** Device-local encryption for personal Gemini/OpenAI API keys. Never log keys. */
+class AiKeyStore(context: Context, provider: String = "gemini") {
+    init { require(provider == "gemini" || provider == "openai") }
+    private val prefs = context.applicationContext.getSharedPreferences(
+        if (provider == "openai") "tiffy_openai_secrets" else "momo_ai_secrets",
+        Context.MODE_PRIVATE
+    )
+    private val alias = if (provider == "openai") "tiffy_openai_key_v1" else "momo_gemini_key_v1"
 
     private fun secretKey(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

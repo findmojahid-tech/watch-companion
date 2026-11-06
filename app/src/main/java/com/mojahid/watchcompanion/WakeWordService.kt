@@ -64,7 +64,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         super.onCreate()
         val notifications = getSystemService(NotificationManager::class.java)
         notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Momo wake listening", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL, "Tiffy wake listening", NotificationManager.IMPORTANCE_LOW)
         )
         audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         routeToPreferredWatch()
@@ -129,8 +129,8 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         )
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Momo is listening")
-            .setContentText("Say Momo or Hey Momo. Stop from here anytime.")
+            .setContentTitle("Tiffy is listening")
+            .setContentText("Say Tiffy or Hey Tiffy. Stop from here anytime.")
             .setOngoing(true)
             .addAction(0, "Stop", pending)
             .build()
@@ -242,8 +242,8 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                     SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
                 val exactWake = suggestions.firstOrNull {
                     val phrase = it.trim().lowercase(Locale.ROOT)
-                    phrase == "momo" || phrase == "hey momo" ||
-                        phrase == "hello momo" || phrase == "hi momo"
+                    phrase == "tiffy" || phrase == "hey tiffy" ||
+                        phrase == "hello tiffy" || phrase == "hi tiffy"
                 }
                 if (exactWake != null) partialHits++ else partialHits = 0
                 if (partialHits >= 2 && exactWake != null) {
@@ -325,28 +325,10 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
                 if (local != null) {
                     local.message
                 } else {
-                    val key = keys.read()
-                    val offlineReady = OfflineModelStore(this@WakeWordService).verified()
-                    if (!key.isNullOrBlank()) {
-                        try {
-                            val response = GeminiClient.chat(text, conversation, key)
-                            conversation = (conversation + ChatTurn("user", text) +
-                                ChatTurn("model", response)).takeLast(8)
-                            response
-                        } catch (error: Exception) {
-                            if (offlineReady) {
-                                OfflineMomo.answer(this@WakeWordService, text)
-                            } else {
-                                "Gemini connection issue. Open AI Brain and test " +
-                                    "your saved key. " +
-                                    (error.message ?: "").take(90)
-                            }
-                        }
-                    } else if (offlineReady) {
-                        OfflineMomo.answer(this@WakeWordService, text)
-                    } else {
-                        "Connect Gemini in AI Brain, or download Momo's offline brain."
-                    }
+                    val response = TiffyBrain.answer(this@WakeWordService, text, conversation)
+                    conversation = (conversation + ChatTurn("user", text) +
+                        ChatTurn("model", response)).takeLast(8)
+                    response
                 }
             } catch (error: Exception) {
                 "Sorry, I couldn't answer yet. " +

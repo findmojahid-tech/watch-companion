@@ -67,6 +67,7 @@ fun MomoHome(
     val prefs = remember { context.getSharedPreferences("momo_runtime", Context.MODE_PRIVATE) }
     val taskEngine = remember { EnglishTaskEngine(context) }
     val keys = remember { AiKeyStore(context) }
+    val openAiKeys = remember { AiKeyStore(context, "openai") }
     val offlineStore = remember { OfflineModelStore(context) }
     val diagnostics = remember { BleDiagnostics(context) }
     val directWatch = remember { DirectWatchSession.get(context.applicationContext) }
@@ -75,7 +76,7 @@ fun MomoHome(
     val scope = rememberCoroutineScope()
 
     var model by remember { mutableStateOf(ModelDownloadStatus("Checking offline AI...")) }
-    var status by remember { mutableStateOf("Hi! I'm Momo. Let's get your watch ready.") }
+    var status by remember { mutableStateOf("Hi! I'm Tiffy. Your personal AI assistant is ready to set up.") }
     var face by remember { mutableStateOf(FaceState.IDLE) }
     var heard by remember { mutableStateOf("") }
     var answer by remember { mutableStateOf("") }
@@ -101,6 +102,9 @@ fun MomoHome(
     var showTasks by remember { mutableStateOf(false) }
     var tasks by remember { mutableStateOf(taskEngine.tasks()) }
     var aiKey by remember { mutableStateOf("") }
+    var openAiKey by remember { mutableStateOf("") }
+    var connectingOpenAi by remember { mutableStateOf(false) }
+    var openAiInfo by remember { mutableStateOf(if (openAiKeys.read().isNullOrBlank()) "OpenAI is not connected." else "OpenAI key saved on this phone.") }
     var cloudInfo by remember {
         mutableStateOf(if (keys.read().isNullOrBlank())
             "No cloud AI connected. Paste a key once to activate fast English answers."
@@ -158,7 +162,7 @@ fun MomoHome(
         val text = raw.trim()
         if (text.isBlank() || isBusy) return
         heard = text
-        status = "Momo is thinking..."
+        status = "Tiffy is thinking..."
         answer = ""
         face = FaceState.THINKING
         isBusy = true
@@ -169,26 +173,10 @@ fun MomoHome(
                     tasks = local.tasks
                     local.message
                 } else {
-                    val key = keys.read()
-                    if (!key.isNullOrBlank()) {
-                        try {
-                            val result = GeminiClient.chat(text, chatHistory, key)
-                            chatHistory = (chatHistory + ChatTurn("user", text) +
-                                ChatTurn("model", result)).takeLast(8)
-                            result
-                        } catch (cloudError: Exception) {
-                            if (offlineStore.verified()) {
-                                OfflineMomo.answer(context, text)
-                            } else {
-                                "Gemini connection issue: " +
-                                    (cloudError.message ?: "Try the AI key test below.")
-                            }
-                        }
-                    } else if (offlineStore.verified()) {
-                        OfflineMomo.answer(context, text)
-                    } else {
-                        "Connect Gemini under AI Brain below, or download the offline AI."
-                    }
+                    val result = TiffyBrain.answer(context, text, chatHistory)
+                    chatHistory = (chatHistory + ChatTurn("user", text) +
+                        ChatTurn("model", result)).takeLast(8)
+                    result
                 }
             } catch (error: Exception) {
                 "I couldn't answer yet: " + (error.message ?: "try again.")
@@ -211,7 +199,7 @@ fun MomoHome(
             ContextCompat.startForegroundService(context, Intent(context, WakeWordService::class.java))
         }.onSuccess {
             wakeEnabled = true
-            status = "Momo is listening. Say 'Momo' or 'Hey Momo'."
+            status = "Tiffy is listening. Say 'Tiffy' or 'Hey Tiffy'."
             face = FaceState.LISTENING
         }.onFailure {
             status = "Couldn't start wake listening. Open Momo and retry: " +
@@ -224,7 +212,7 @@ fun MomoHome(
         prefs.edit().putBoolean("wake_running", false).apply()
         wakeEnabled = false
         face = FaceState.IDLE
-        status = "Momo is resting. Tap Start Momo when you want to talk."
+        status = "Tiffy is resting. Tap Start Tiffy when you want to talk."
     }
 
     /**
@@ -310,7 +298,7 @@ fun MomoHome(
                             watchSpeechStatus = "Watch mic AudioRecord route: " + route +
                                 ". Recognition service may still use a different input."
                             val clean = spoken.replace(
-                                Regex("^(?:(?:hey|hi|hello)\\s+)?momo[\\s,.:!?]*",
+                                Regex("^(?:(?:hey|hi|hello)\\s+)?tiffy[\\s,.:!?]*",
                                     RegexOption.IGNORE_CASE), ""
                             ).trim().ifBlank { spoken }
                             ask(clean)
@@ -390,14 +378,15 @@ fun MomoHome(
             )
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("MOMO", style = MaterialTheme.typography.headlineLarge,
+                Text("TIFFY", style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Black, color = Color.White)
                 Text(
-                    if (wakeEnabled) "Listening for Momo" else "Your tiny AI companion",
+                    if (wakeEnabled) "Listening for Tiffy" else "Your personal JARVIS companion",
                     color = MomoBlue, style = MaterialTheme.typography.titleSmall
                 )
                 MomoNote(
-                    if (cloudConfigured) "Gemini AI key saved · cloud answers first"
+                    if (!openAiKeys.read().isNullOrBlank()) "OpenAI AI connected · fast answers"
+                    else if (cloudConfigured) "Gemini AI key saved · cloud answers first"
                     else if (model.ready) "Free offline AI ready"
                     else "AI not connected — setup below"
                 )
@@ -412,7 +401,7 @@ fun MomoHome(
                 fontWeight = FontWeight.Bold
             )
             MomoNote(
-                "Say 'Momo' or 'Hey Momo'. I'll answer 'Yes?' — then ask your question in English."
+                "Say 'Tiffy' or 'Hey Tiffy'. I'll answer 'Yes?' — then ask your question in English."
             )
             Button(
                 onClick = { if (wakeEnabled) stopWake() else startWake() },
@@ -420,7 +409,7 @@ fun MomoHome(
                 modifier = Modifier.fillMaxWidth().height(62.dp),
                 shape = RoundedCornerShape(21.dp)
             ) {
-                Text(if (wakeEnabled) "Stop Momo Listening" else "Start Momo Listening",
+                Text(if (wakeEnabled) "Stop Tiffy Listening" else "Start Tiffy Listening",
                     fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
             }
             Button(
@@ -456,7 +445,7 @@ fun MomoHome(
                                 if (best.isBlank()) {
                                     status = "I didn't catch that. Tap and try again."
                                 } else {
-                                    ask(best.removePrefix("Hey Momo").removePrefix("Momo").trim())
+                                    ask(WakePhrase.parse(best).command)
                                 }
                             },
                             { issue ->
@@ -492,14 +481,64 @@ fun MomoHome(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f))
                 Text(
-                    if (cloudConfigured) "KEY SAVED" else "SETUP",
+                    if (cloudConfigured || !openAiKeys.read().isNullOrBlank()) "KEY SAVED" else "SETUP",
                     color = MomoBlue,
                     style = MaterialTheme.typography.labelMedium
                 )
             }
 
-            MomoNote("Cloud Gemini answers first when your personal key is saved. " +
-                "You can also use the free offline model without a key.")
+            MomoNote("OpenAI is the preferred brain. Gemini and offline AI remain fallbacks.")
+            if (openAiKeys.read().isNullOrBlank() || openAiKey.isNotBlank()) {
+                OutlinedTextField(
+                    value = openAiKey,
+                    onValueChange = { openAiKey = it.trim().take(250) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    label = { Text("OpenAI API key") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(
+                    enabled = openAiKey.isNotBlank() && !connectingOpenAi,
+                    onClick = {
+                        val candidate = openAiKey.trim()
+                        connectingOpenAi = true
+                        openAiInfo = "Verifying OpenAI connection..."
+                        scope.launch {
+                            try {
+                                val tested = OpenAiClient.verifyKey(candidate)
+                                if (openAiKeys.save(candidate)) {
+                                    openAiKey = ""
+                                    openAiInfo = "OpenAI connected: " + tested.model
+                                } else {
+                                    openAiInfo = "Key verified but could not be saved securely."
+                                }
+                            } catch (error: Exception) {
+                                openAiInfo = "OpenAI connection failed: " +
+                                    (error.message ?: "Check API quota and key.")
+                            } finally {
+                                connectingOpenAi = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (connectingOpenAi) "Connecting..." else "Connect OpenAI") }
+            }
+            if (!openAiKeys.read().isNullOrBlank()) {
+                TextButton(onClick = {
+                    openAiKeys.clear()
+                    openAiInfo = "OpenAI key removed from phone."
+                    chatHistory = emptyList()
+                }, modifier = Modifier.fillMaxWidth()) { Text("Remove OpenAI key") }
+            }
+            MomoNote(openAiInfo)
+            OutlinedButton(onClick = {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://platform.openai.com/api-keys"))
+                )
+            }, modifier = Modifier.fillMaxWidth()) { Text("Open OpenAI API keys") }
+            MomoNote("ChatGPT subscription and API billing are separate. For this personal prototype the key is stored in Android Keystore, but a private backend is safer for production.")
+
+            MomoNote("Gemini remains an optional fallback; the offline model is available below.")
             if (!cloudConfigured || aiKey.isNotBlank()) {
                 OutlinedTextField(
                     value = aiKey,
