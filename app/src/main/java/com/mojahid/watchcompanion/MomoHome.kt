@@ -925,6 +925,18 @@ fun MomoHome(
             }
         }
 
+        if (useCmfWatch) {
+            MomoPanel {
+                Text("TIFFY watch face · D395", color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold)
+                MomoNote("CMF Watch controls its watch faces. Static image faces may " +
+                    "be supported, but Tiffy animated eyes and direct dial uploads " +
+                    "are NOT verified. No firmware or proprietary BLE writes.")
+                MomoNote("The animated face in the Pixel 7 app is not on " +
+                    "the physical watch screen.")
+            }
+        } else {
         MomoPanel {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CompanionFace(FaceState.IDLE, Modifier.size(90.dp))
@@ -1123,14 +1135,15 @@ fun MomoHome(
                 "remain blocked. Only one optional six-byte watch identification " +
                 "query can be sent with explicit watch-risk consent.")
         }
+        } // End Watch 7-only diagnostics. Never use W17 commands on D395.
 
         MomoPanel {
-            Text("Ask in English", color = Color.White,
+            Text("Ask Tiffy", color = Color.White,
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
-                placeholder = { Text("Ask Momo a question...") },
+                placeholder = { Text("Ask Tiffy anything...") },
                 modifier = Modifier.fillMaxWidth(), minLines = 1, maxLines = 3
             )
             Button(
@@ -1141,7 +1154,7 @@ fun MomoHome(
                 },
                 enabled = input.isNotBlank() && !isBusy,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Ask Momo") }
+            ) { Text("Ask Tiffy") }
             MomoNote("Examples: 'Why is the sky blue?', 'Add a task to design a logo', " +
                 "'What tasks are left?'")
         }
@@ -1155,7 +1168,7 @@ fun MomoHome(
                 }
             }
             if (showTasks) {
-                if (tasks.isEmpty()) MomoNote("No tasks yet. Ask Momo to add one.")
+                if (tasks.isEmpty()) MomoNote("No tasks yet. Ask Tiffy to add one.")
                 tasks.forEach { task ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = task.done, onCheckedChange = { checked ->
