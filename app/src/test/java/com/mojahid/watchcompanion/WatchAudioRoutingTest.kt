@@ -53,6 +53,12 @@ class WatchAudioRoutingTest {
         ))
     }
 
+    @Test fun doesNotAutoChooseCmfBudsPro() {
+        assertNull(WatchAudioRouting.choose(
+            listOf(d(43, "CMF Buds Pro 2")), null
+        ))
+    }
+
     @Test fun doesNotAutoChooseNothingEarbuds() {
         assertNull(WatchAudioRouting.choose(
             listOf(d(42, "Nothing Ear (a)")), null
