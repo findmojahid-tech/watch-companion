@@ -96,6 +96,10 @@ fun MomoHome(
     var micTestStatus by remember {
         mutableStateOf("Speaker confirmed by user. Microphone source still needs testing.")
     }
+    // D395 uses Android's Bluetooth call audio, not proprietary W17 GATT.
+    var useCmfWatch by remember {
+        mutableStateOf(prefs.getBoolean("tiffy_cmf_d395_audio_mode", true))
+    }
     var showAdvanced by remember { mutableStateOf(false) }
     var watchProbeAccepted by remember { mutableStateOf(false) }
     var watchAutoIdentify by remember { mutableStateOf(false) }
@@ -128,7 +132,7 @@ fun MomoHome(
         }
         pairedWatches = directWatch.pairedWatches()
         if (result[Manifest.permission.BLUETOOTH_CONNECT] == true) {
-            directWatch.reconnectIfEnabled()
+            if (!useCmfWatch) directWatch.reconnectIfEnabled()
         }
     }
 
@@ -141,8 +145,7 @@ fun MomoHome(
         runCatching {
             audioChoices = audio.availableCommunicationDevices.filter {
                 it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
-                    it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
             }
             chosenAudio = audio.communicationDevice
             audioInfo = if (audioChoices.isEmpty()) {
@@ -192,7 +195,7 @@ fun MomoHome(
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED) {
             requestPermissions.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
-            status = "Please allow the microphone, then tap Start Momo again."
+            status = "Please allow the microphone, then tap Start Tiffy again."
             return
         }
         runCatching {
@@ -202,7 +205,7 @@ fun MomoHome(
             status = "Tiffy is listening. Say 'Tiffy' or 'Hey Tiffy'."
             face = FaceState.LISTENING
         }.onFailure {
-            status = "Couldn't start wake listening. Open Momo and retry: " +
+            status = "Couldn't start wake listening. Open Tiffy and retry: " +
                 (it.message ?: "Android restriction.")
         }
     }
@@ -222,7 +225,7 @@ fun MomoHome(
      */
     fun startWatchVoice() {
         if (watchSpeechRunning || wakeEnabled || micTestRunning || voiceBusy || isBusy) return
-        if (!watch.isConnected) {
+        if (!useCmfWatch && !watch.isConnected) {
             watchSpeechStatus = "Connect Watch 7 below before talking through the watch."
             status = watchSpeechStatus
             return
@@ -268,15 +271,29 @@ fun MomoHome(
         chosenAudio = device
         val name = device.productName?.toString().orEmpty()
         prefs.edit().putString("preferred_audio_name", name).apply()
-        audioInfo = name + " selected for Momo speech; use Release watch audio to restore phone."
+        audioInfo = name + " selected for Tiffy speech; release watch audio to restore phone."
         watchSpeechRunning = true
         face = FaceState.LISTENING
-        status = "Listening for your question on Watch 7..."
-        watchSpeechStatus = "Watch call selected. Speak in English within 9 seconds."
+        status = if (useCmfWatch) "Listening through CMF Watch Pro D395..."
+            else "Listening through Watch 7..."
+        watchSpeechStatus = "Bluetooth call audio selected. Speak near the watch within 9 seconds."
 
         scope.launch {
-            // HFP/BLE Audio needs a short route-settle period on Pixel 7.
-            delay(650)
+            // setCommunicationDevice() requests a route but the HFP/LE audio
+            // endpoint can take time to become the active route.
+            var attempts = 0
+            while (attempts < 20 &&
+                audio.communicationDevice?.id != device.id) {
+                delay(250)
+                attempts++
+            }
+            if (audio.communicationDevice?.id != device.id) {
+                watchSpeechRunning = false
+                watchSpeechStatus = "Bluetooth call-audio route never became active. " +
+                    "Check that the watch call profile is connected, then retry."
+                face = FaceState.CONFUSED
+                return@launch
+            }
             recognizeWatch(
                 prefs.getString("recognition_locale", "en-IN") ?: "en-IN",
                 { progress -> watchSpeechStatus = progress },
@@ -325,8 +342,20 @@ fun MomoHome(
         }
         requestPermissions.launch(permissions.toTypedArray())
         audioRefresh()
-        pairedWatches = directWatch.pairedWatches()
-        directWatch.reconnectIfEnabled()
+        if (!useCmfWatch) {
+            pairedWatches = directWatch.pairedWatches()
+            directWatch.reconnectIfEnabled()
+        } else {
+            // Don't carry an old W17 audio route into the new D395 profile.
+            if (!prefs.getBoolean("tiffy_cmf_mode_initialized", false)) {
+                prefs.edit()
+                    .remove("preferred_audio_name")
+                    .putBoolean("tiffy_cmf_mode_initialized", true)
+                    .apply()
+            }
+            // Do not compete with the paired CMF Watch app for GATT access.
+            directWatch.disconnect()
+        }
     }
 
     // Refresh model download and show last recognized wake conversation without requiring
@@ -395,7 +424,7 @@ fun MomoHome(
 
         MomoPanel {
             Text(
-                if (wakeEnabled) "Say 'Momo' anytime while listening is active"
+                if (wakeEnabled) "Say 'Tiffy' anytime while listening is active"
                 else "One name. One assistant.",
                 color = Color.White, style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
@@ -420,12 +449,17 @@ fun MomoHome(
                 shape = RoundedCornerShape(17.dp)
             ) {
                 Text(
-                    if (watchSpeechRunning) "Listening through Watch 7..."
+                    if (watchSpeechRunning) "Listening through your watch..."
+                    else if (useCmfWatch) "Talk through CMF Watch Pro"
                     else "Talk through Watch 7",
                     fontWeight = FontWeight.Bold
                 )
             }
-            if (!watch.isConnected) {
+            if (useCmfWatch) {
+                MomoNote("CMF Watch Pro stays paired in CMF Watch app. " +
+                    "Tiffy uses its separate Android Bluetooth call-audio profile.")
+                if (watchSpeechStatus.isNotBlank()) MomoNote(watchSpeechStatus)
+            } else if (!watch.isConnected) {
                 MomoNote("Connect Watch 7 below to activate the watch microphone.")
             } else if (watchSpeechStatus.isNotBlank()) {
                 MomoNote(watchSpeechStatus)
@@ -679,6 +713,40 @@ fun MomoHome(
         }
 
         MomoPanel {
+            Text("Watch profile", color = Color.White,
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (useCmfWatch) "CMF Watch Pro D395" else "Legacy Watch 7",
+                    modifier = Modifier.weight(1f), color = Color.White
+                )
+                Switch(
+                    checked = useCmfWatch,
+                    onCheckedChange = { enabled ->
+                        useCmfWatch = enabled
+                        prefs.edit().putBoolean("tiffy_cmf_d395_audio_mode", enabled).apply()
+                        if (enabled) {
+                            prefs.edit().putBoolean("tiffy_cmf_mode_initialized", true).apply()
+                            directWatch.disconnect()
+                            // Old W17 audio preference must not hijack CMF sessions.
+                            prefs.edit().remove("preferred_audio_name").apply()
+                            runCatching { audio.clearCommunicationDevice() }
+                            runCatching { audio.mode = AudioManager.MODE_NORMAL }
+                            chosenAudio = null
+                        }
+                        audioRefresh()
+                        status = if (enabled) "Using paired CMF Watch Pro audio."
+                            else "Legacy Watch 7 GATT diagnostics enabled."
+                    },
+                    enabled = !wakeEnabled && !watchSpeechRunning && !micTestRunning
+                )
+            }
+            if (useCmfWatch) {
+                MomoNote("Keep CMF Watch paired in its official app. Tiffy will not " +
+                    "access CMF vendor services, keys or watch firmware. Select its " +
+                    "Bluetooth call-audio endpoint below.")
+            }
+            if (!useCmfWatch) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Connect your Watch 7", color = Color.White,
                     style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
@@ -786,11 +854,16 @@ fun MomoHome(
                     }
             }
 
+            } // Legacy Watch 7 GATT controls (CMF does not use these).
             HorizontalDivider(color = Color(0xFF344155))
             Text("Watch microphone & speaker", color = Color.White,
                 style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            MomoNote("Select the separate 'Watch call' audio profile below. " +
-                "The watch data link and voice audio are different Bluetooth connections.")
+            MomoNote(if (useCmfWatch)
+                "The already-paired D395 call-audio endpoint is enough. " +
+                    "Do not unpair CMF Watch or install another watch management app."
+            else
+                "Choose the separate Watch call audio profile below. " +
+                    "Watch 7 data and call audio are different connections.")
             MomoNote(audioInfo)
             audioChoices.forEach { device ->
                 Button(
@@ -818,7 +891,7 @@ fun MomoHome(
                     pairedWatches = directWatch.pairedWatches()
                 }, modifier = Modifier.weight(1f)) { Text("Refresh audio") }
                 OutlinedButton(onClick = {
-                    say("Hello! I am Momo. Can you hear me through your watch?")
+                    say("Hello! I am Tiffy. Can you hear me through your watch?")
                 }, modifier = Modifier.weight(1f)) { Text("Test speaker") }
             }
             OutlinedButton(
@@ -868,18 +941,47 @@ fun MomoHome(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(if (watchSpeechRunning) "Listening through watch..." else
-                    "Ask Momo using watch microphone")
+                    "Ask Tiffy using watch microphone")
             }
             MomoNote(watchSpeechStatus)
             MomoNote("The watch mic is explicitly captured for this test. " +
                 "Android speech services may ignore injected audio; successful " +
                 "English recognition with the phone kept away is the next check.")
             if (wakeEnabled) {
-                MomoNote("Turn off Momo Listening before the mic test so the " +
+                MomoNote("Turn off Tiffy Listening before the mic test so the " +
                     "two microphone sessions don't compete.")
             }
         }
 
+        if (useCmfWatch) {
+            MomoPanel {
+                Text("TIFFY watch face · D395", color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold)
+                MomoNote("CMF Watch controls its watch faces. Static image faces may " +
+                    "be supported, but Tiffy animated eyes and direct dial uploads " +
+                    "are NOT verified. No firmware or proprietary BLE writes.")
+                Button(
+                    onClick = {
+                        dialInfo = if (MomoFaceExport.saveToGallery(
+                                context, MomoFaceExport.Target.CMF_D395
+                            )) {
+                            "Saved TIFFY-CMF-D395 (410x502 PNG) in Pictures/Tiffy. " +
+                                "Open CMF Watch to select it as a CUSTOM background."
+                        } else {
+                            "Could not save the Tiffy PNG to Gallery."
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Create TIFFY D395 face image") }
+                if (dialInfo.isNotBlank()) MomoNote(dialInfo)
+                MomoNote("CMF Watch app → Watch Face marketplace → My → " +
+                    "Customize Watch Face → choose the Tiffy background → " +
+                    "apply to watch. This is a static background, not live animation.")
+                MomoNote("The animated face in the Pixel 7 app is not on " +
+                    "the physical watch screen.")
+            }
+        } else {
         MomoPanel {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CompanionFace(FaceState.IDLE, Modifier.size(90.dp))
@@ -1078,14 +1180,15 @@ fun MomoHome(
                 "remain blocked. Only one optional six-byte watch identification " +
                 "query can be sent with explicit watch-risk consent.")
         }
+        } // End Watch 7-only diagnostics. Never use W17 commands on D395.
 
         MomoPanel {
-            Text("Ask in English", color = Color.White,
+            Text("Ask Tiffy", color = Color.White,
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
-                placeholder = { Text("Ask Momo a question...") },
+                placeholder = { Text("Ask Tiffy anything...") },
                 modifier = Modifier.fillMaxWidth(), minLines = 1, maxLines = 3
             )
             Button(
@@ -1096,7 +1199,7 @@ fun MomoHome(
                 },
                 enabled = input.isNotBlank() && !isBusy,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Ask Momo") }
+            ) { Text("Ask Tiffy") }
             MomoNote("Examples: 'Why is the sky blue?', 'Add a task to design a logo', " +
                 "'What tasks are left?'")
         }
@@ -1110,7 +1213,7 @@ fun MomoHome(
                 }
             }
             if (showTasks) {
-                if (tasks.isEmpty()) MomoNote("No tasks yet. Ask Momo to add one.")
+                if (tasks.isEmpty()) MomoNote("No tasks yet. Ask Tiffy to add one.")
                 tasks.forEach { task ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = task.done, onCheckedChange = { checked ->

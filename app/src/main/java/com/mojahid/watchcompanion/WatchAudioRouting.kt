@@ -22,7 +22,9 @@ object WatchAudioRouting {
         val known = candidates.filter {
             val name = it.label.lowercase(java.util.Locale.ROOT)
             name.contains("watch") || name.contains("w17") ||
-                name.contains("momo") || name.contains("wrist")
+                name.contains("d395") ||
+                (name.contains("cmf") && name.contains("call")) ||
+                name.contains("wrist")
         }
         if (known.isEmpty()) return null
 
