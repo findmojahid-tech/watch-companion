@@ -279,8 +279,21 @@ fun MomoHome(
         watchSpeechStatus = "Bluetooth call audio selected. Speak near the watch within 9 seconds."
 
         scope.launch {
-            // HFP/BLE Audio needs a short route-settle period on Pixel 7.
-            delay(650)
+            // setCommunicationDevice() requests a route but the HFP/LE audio
+            // endpoint can take time to become the active route.
+            var attempts = 0
+            while (attempts < 20 &&
+                audio.communicationDevice?.id != device.id) {
+                delay(250)
+                attempts++
+            }
+            if (audio.communicationDevice?.id != device.id) {
+                watchSpeechRunning = false
+                watchSpeechStatus = "Bluetooth call-audio route never became active. " +
+                    "Check that the watch call profile is connected, then retry."
+                face = FaceState.CONFUSED
+                return@launch
+            }
             recognizeWatch(
                 prefs.getString("recognition_locale", "en-IN") ?: "en-IN",
                 { progress -> watchSpeechStatus = progress },
