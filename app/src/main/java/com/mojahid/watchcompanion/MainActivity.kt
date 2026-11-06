@@ -104,9 +104,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private fun speak(message: String) {
         val prefs = getSharedPreferences("momo_runtime", Context.MODE_PRIVATE)
         if (prefs.getBoolean("tiffy_cmf_d395_audio_mode", true)) {
-            watchVoice?.speak(message) { report ->
+            watchVoice?.speak(message, onStatus = { report ->
                 prefs.edit().putString("tiffy_audio_status", report).apply()
-            }
+            })
         } else if (::tts.isInitialized) {
             tts.speak(
                 message.take(1600), TextToSpeech.QUEUE_FLUSH,
