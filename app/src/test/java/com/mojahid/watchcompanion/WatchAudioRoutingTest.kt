@@ -35,6 +35,30 @@ class WatchAudioRoutingTest {
             listOf(d(7, "watch 7")), null
         ))
     }
+    @Test fun routesCmfD395ByModelEvenWithPixelBudsPresent() {
+        assertEquals(20, WatchAudioRouting.choose(
+            listOf(d(10, "Pixel Buds Pro"), d(20, "CMF Watch Pro D395")), null
+        ))
+    }
+
+    @Test fun routesCmfBluetoothCallProfile() {
+        assertEquals(22, WatchAudioRouting.choose(
+            listOf(d(22, "CMF Call")), null
+        ))
+    }
+
+    @Test fun neverGuessesBetweenCmfAndAnotherWatch() {
+        assertNull(WatchAudioRouting.choose(
+            listOf(d(21, "Watch call"), d(22, "CMF Watch Pro D395")), null
+        ))
+    }
+
+    @Test fun doesNotAutoChooseNothingEarbuds() {
+        assertNull(WatchAudioRouting.choose(
+            listOf(d(42, "Nothing Ear (a)")), null
+        ))
+    }
+
     @Test fun savedUserChosenBtCallDeviceCanBeReusedWithoutGuessing() {
         assertEquals(12, WatchAudioRouting.choose(
             listOf(d(10, "Pixel Buds"), d(12, "BT Call")), "BT Call"
