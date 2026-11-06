@@ -96,6 +96,10 @@ fun MomoHome(
     var micTestStatus by remember {
         mutableStateOf("Speaker confirmed by user. Microphone source still needs testing.")
     }
+    // D395 uses Android's Bluetooth call audio, not proprietary W17 GATT.
+    var useCmfWatch by remember {
+        mutableStateOf(prefs.getBoolean("tiffy_cmf_d395_audio_mode", true))
+    }
     var showAdvanced by remember { mutableStateOf(false) }
     var watchProbeAccepted by remember { mutableStateOf(false) }
     var watchAutoIdentify by remember { mutableStateOf(false) }
@@ -128,7 +132,7 @@ fun MomoHome(
         }
         pairedWatches = directWatch.pairedWatches()
         if (result[Manifest.permission.BLUETOOTH_CONNECT] == true) {
-            directWatch.reconnectIfEnabled()
+            if (!useCmfWatch) directWatch.reconnectIfEnabled()
         }
     }
 
@@ -141,8 +145,7 @@ fun MomoHome(
         runCatching {
             audioChoices = audio.availableCommunicationDevices.filter {
                 it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
-                    it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
             }
             chosenAudio = audio.communicationDevice
             audioInfo = if (audioChoices.isEmpty()) {
@@ -222,7 +225,7 @@ fun MomoHome(
      */
     fun startWatchVoice() {
         if (watchSpeechRunning || wakeEnabled || micTestRunning || voiceBusy || isBusy) return
-        if (!watch.isConnected) {
+        if (!useCmfWatch && !watch.isConnected) {
             watchSpeechStatus = "Connect Watch 7 below before talking through the watch."
             status = watchSpeechStatus
             return
@@ -268,11 +271,12 @@ fun MomoHome(
         chosenAudio = device
         val name = device.productName?.toString().orEmpty()
         prefs.edit().putString("preferred_audio_name", name).apply()
-        audioInfo = name + " selected for Momo speech; use Release watch audio to restore phone."
+        audioInfo = name + " selected for Tiffy speech; release watch audio to restore phone."
         watchSpeechRunning = true
         face = FaceState.LISTENING
-        status = "Listening for your question on Watch 7..."
-        watchSpeechStatus = "Watch call selected. Speak in English within 9 seconds."
+        status = if (useCmfWatch) "Listening through CMF Watch Pro D395..."
+            else "Listening through Watch 7..."
+        watchSpeechStatus = "Bluetooth call audio selected. Speak near the watch within 9 seconds."
 
         scope.launch {
             // HFP/BLE Audio needs a short route-settle period on Pixel 7.
@@ -325,8 +329,13 @@ fun MomoHome(
         }
         requestPermissions.launch(permissions.toTypedArray())
         audioRefresh()
-        pairedWatches = directWatch.pairedWatches()
-        directWatch.reconnectIfEnabled()
+        if (!useCmfWatch) {
+            pairedWatches = directWatch.pairedWatches()
+            directWatch.reconnectIfEnabled()
+        } else {
+            // Do not compete with the paired CMF Watch app for GATT access.
+            directWatch.disconnect()
+        }
     }
 
     // Refresh model download and show last recognized wake conversation without requiring
@@ -395,7 +404,7 @@ fun MomoHome(
 
         MomoPanel {
             Text(
-                if (wakeEnabled) "Say 'Momo' anytime while listening is active"
+                if (wakeEnabled) "Say 'Tiffy' anytime while listening is active"
                 else "One name. One assistant.",
                 color = Color.White, style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
@@ -420,12 +429,17 @@ fun MomoHome(
                 shape = RoundedCornerShape(17.dp)
             ) {
                 Text(
-                    if (watchSpeechRunning) "Listening through Watch 7..."
+                    if (watchSpeechRunning) "Listening through your watch..."
+                    else if (useCmfWatch) "Talk through CMF Watch Pro"
                     else "Talk through Watch 7",
                     fontWeight = FontWeight.Bold
                 )
             }
-            if (!watch.isConnected) {
+            if (useCmfWatch) {
+                MomoNote("CMF Watch Pro stays paired in CMF Watch app. " +
+                    "Tiffy uses its separate Android Bluetooth call-audio profile.")
+                if (watchSpeechStatus.isNotBlank()) MomoNote(watchSpeechStatus)
+            } else if (!watch.isConnected) {
                 MomoNote("Connect Watch 7 below to activate the watch microphone.")
             } else if (watchSpeechStatus.isNotBlank()) {
                 MomoNote(watchSpeechStatus)
