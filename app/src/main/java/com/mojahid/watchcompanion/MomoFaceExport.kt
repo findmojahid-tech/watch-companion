@@ -16,20 +16,31 @@ import java.util.Locale
 
 /**
  * 320 x 390 original Momo face optimized for the widely listed W17 Pro dial resolution.
- * This exports a normal PNG, not a proprietary watch firmware file.
+ * D395 additionally exports a 410 x 502 Tiffy background PNG for the CMF Watch app.
+ * This exports normal PNG images, never proprietary watch firmware files.
  * File export is local only; V7 intentionally has no unsupported watch-face upload action.
  */
 object MomoFaceExport {
-    fun saveToGallery(context: Context): Boolean = runCatching {
-        val w = 320
-        val h = 390
+    enum class Target(val width: Int, val height: Int) {
+        WATCH_7(320, 390),
+        CMF_D395(410, 502)
+    }
+
+    fun saveToGallery(
+        context: Context,
+        target: Target = Target.WATCH_7
+    ): Boolean = runCatching {
+        val w = target.width
+        val h = target.height
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         try {
             val canvas = Canvas(bitmap)
+            // Preserve geometry; the D395 screen has nearly the same aspect ratio.
+            canvas.scale(w / 320f, h / 390f)
             val p = Paint(Paint.ANTI_ALIAS_FLAG)
-            p.shader = LinearGradient(0f, 0f, 0f, h.toFloat(),
+            p.shader = LinearGradient(0f, 0f, 0f, 390f,
                 Color.rgb(6, 10, 19), Color.rgb(12, 19, 33), Shader.TileMode.CLAMP)
-            canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
+            canvas.drawRect(0f, 0f, 320f, 390f, p)
             p.shader = null
 
             // Dark rounded robot head; no intense HDR bloom or overly sharp effects.
@@ -63,14 +74,20 @@ object MomoFaceExport {
                 android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
             p.letterSpacingCompat(0f)
             p.color = Color.rgb(125, 155, 171)
-            canvas.drawText("M O M O", 160f, 330f, p)
+            canvas.drawText(
+                if (target == Target.CMF_D395) "T I F F Y" else "M O M O",
+                160f, 330f, p
+            )
 
             val now = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
             val resolver = context.contentResolver
             val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, "Momo-W17-" + now + ".png")
+                put(MediaStore.Images.Media.DISPLAY_NAME,
+                    if (target == Target.CMF_D395) "Tiffy-CMF-D395-" + now + ".png"
+                    else "Momo-W17-" + now + ".png")
                 put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Momo")
+                put(MediaStore.Images.Media.RELATIVE_PATH,
+                    if (target == Target.CMF_D395) "Pictures/Tiffy" else "Pictures/Momo")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
