@@ -51,6 +51,7 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
 
     private var recognizer: SpeechRecognizer? = null
     private var watchBridge: WatchSpeechBridge? = null
+    private var watchVoice: WatchVoicePlayback? = null
     private var watchListening = false
     private lateinit var tts: TextToSpeech
     private lateinit var audio: AudioManager
@@ -69,15 +70,10 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         routeToPreferredWatch()
         tts = TextToSpeech(this, this)
-        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String) {}
-            override fun onDone(utteranceId: String) {
-                handler.post { if (!busy) scheduleListening(450) }
-            }
-            override fun onError(utteranceId: String) {
-                handler.post { if (!busy) scheduleListening(650) }
-            }
-        })
+        watchVoice = WatchVoicePlayback(
+            this, audio, tts,
+            onLegacySpeechFinished = { if (!busy) scheduleListening(500) }
+        )
         prefs.edit().putBoolean("wake_running", true).apply()
         startForeground(1001, notification())
         scheduleListening(500)
@@ -99,6 +95,8 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
         watchBridge?.cancel()
         watchBridge = null
         watchListening = false
+        watchVoice?.stop()
+        watchVoice = null
         tts.stop()
         tts.shutdown()
         runCatching { audio.clearCommunicationDevice() }
@@ -158,7 +156,20 @@ class WakeWordService : Service(), TextToSpeech.OnInitListener {
             scheduleListening(1100)
             return
         }
-        tts.speak(text.take(1600), TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+        if (prefs.getBoolean("tiffy_cmf_d395_audio_mode", true)) {
+            watchVoice?.speak(
+                text,
+                onStatus = { report ->
+                    prefs.edit().putString("wake_last_status", report.take(170)).apply()
+                },
+                onFinished = { if (!busy) scheduleListening(550) }
+            ) ?: scheduleListening(1100)
+        } else {
+            tts.speak(
+                text.take(1600), TextToSpeech.QUEUE_FLUSH, null,
+                UUID.randomUUID().toString()
+            )
+        }
     }
 
     private fun releaseRecognizer() {

@@ -88,6 +88,9 @@ fun MomoHome(
     var audioChoices by remember { mutableStateOf<List<AudioDeviceInfo>>(emptyList()) }
     var chosenAudio by remember { mutableStateOf<AudioDeviceInfo?>(null) }
     var audioInfo by remember { mutableStateOf("Connect the Watch call Bluetooth profile.") }
+    var playbackReport by remember {
+        mutableStateOf(prefs.getString("tiffy_audio_status", "").orEmpty())
+    }
     var micTestRunning by remember { mutableStateOf(false) }
     var watchSpeechRunning by remember { mutableStateOf(false) }
     var watchSpeechStatus by remember {
@@ -366,6 +369,7 @@ fun MomoHome(
             model = offlineStore.status()
             wakeEnabled = prefs.getBoolean("wake_running", false)
             wakeInputStatus = prefs.getString("wake_last_status", "").orEmpty()
+            playbackReport = prefs.getString("tiffy_audio_status", "").orEmpty()
             val wakeReply = prefs.getString("wake_last_answer", "").orEmpty()
             if (wakeReply.isNotBlank() && wakeReply != lastWakeReply) {
                 lastWakeReply = wakeReply
@@ -865,6 +869,14 @@ fun MomoHome(
                 "Choose the separate Watch call audio profile below. " +
                     "Watch 7 data and call audio are different connections.")
             MomoNote(audioInfo)
+            if (useCmfWatch) {
+                MomoNote("Tiffy generates its voice locally, then verifies Android's " +
+                    "actual Bluetooth audio output before unmuting. If Android only " +
+                    "exposes calls, it will NOT play a false 'watch' test on Pixel 7.")
+                if (playbackReport.isNotBlank()) {
+                    MomoNote("Last playback check: " + playbackReport)
+                }
+            }
             audioChoices.forEach { device ->
                 Button(
                     onClick = {
@@ -875,7 +887,10 @@ fun MomoHome(
                                 chosenAudio = device
                                 val deviceName = device.productName?.toString().orEmpty()
                                 prefs.edit().putString("preferred_audio_name", deviceName).apply()
-                                audioInfo = deviceName + " selected for Android voice communication."
+                                audioInfo = deviceName + " route requested. Test speaker " +
+                                    "to verify its actual playback output."
+                                playbackReport = "Route requested; playback not tested."
+                                prefs.edit().putString("tiffy_audio_status", playbackReport).apply()
                             } else audioInfo = "Android couldn't route communication audio."
                         }.onFailure { audioInfo = "Audio route not available." }
                     },
@@ -891,6 +906,10 @@ fun MomoHome(
                     pairedWatches = directWatch.pairedWatches()
                 }, modifier = Modifier.weight(1f)) { Text("Refresh audio") }
                 OutlinedButton(onClick = {
+                    if (useCmfWatch) {
+                        playbackReport = "Synthesizing audio for output route check..."
+                        prefs.edit().putString("tiffy_audio_status", playbackReport).apply()
+                    }
                     say("Hello! I am Tiffy. Can you hear me through your watch?")
                 }, modifier = Modifier.weight(1f)) { Text("Test speaker") }
             }
